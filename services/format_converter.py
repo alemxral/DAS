@@ -220,14 +220,38 @@ class FormatConverter:
                         # Scaling
                         if 'scaling' in print_settings:
                             scaling = print_settings['scaling']
-                            if scaling.get('type') == 'percent':
+                            scaling_type = scaling.get('type', 'percent')
+                            
+                            if scaling_type == 'no_scaling':
+                                # No scaling - 100%
+                                ps.Zoom = 100
+                                ps.FitToPagesWide = False
+                                ps.FitToPagesTall = False
+                            elif scaling_type == 'percent':
+                                # Scale to percentage
                                 ps.Zoom = scaling.get('value', 100)
                                 ps.FitToPagesWide = False
                                 ps.FitToPagesTall = False
-                            elif scaling.get('type') == 'fit_to':
+                            elif scaling_type == 'fit_to':
+                                # Fit to specific pages wide/tall
                                 ps.Zoom = False
                                 ps.FitToPagesWide = scaling.get('width', 1)
                                 ps.FitToPagesTall = scaling.get('height', 1)
+                            elif scaling_type == 'fit_sheet_on_one_page':
+                                # Fit entire sheet on one page
+                                ps.Zoom = False
+                                ps.FitToPagesWide = 1
+                                ps.FitToPagesTall = 1
+                            elif scaling_type == 'fit_all_columns_on_one_page':
+                                # Fit all columns on one page width
+                                ps.Zoom = False
+                                ps.FitToPagesWide = 1
+                                ps.FitToPagesTall = False
+                            elif scaling_type == 'fit_all_rows_on_one_page':
+                                # Fit all rows on one page height
+                                ps.Zoom = False
+                                ps.FitToPagesWide = False
+                                ps.FitToPagesTall = 1
                         
                         # Print quality
                         if 'print_quality' in print_settings:

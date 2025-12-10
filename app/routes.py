@@ -161,6 +161,9 @@ def create_job():
             except:
                 pass
         
+        # Get filename variable if provided
+        filename_variable = request.form.get('filename_variable', '##filename##').strip()
+        
         # Get output directory if provided
         output_directory = request.form.get('output_directory', '').strip()
         if output_directory and not os.path.exists(output_directory):
@@ -175,7 +178,8 @@ def create_job():
             data_path=str(data_path),
             output_formats=output_formats,
             excel_print_settings=excel_print_settings,
-            output_directory=output_directory if output_directory else None
+            output_directory=output_directory if output_directory else None,
+            filename_variable=filename_variable
         )
         
         # Start processing in background thread
@@ -404,6 +408,14 @@ def download_job_output(job_id):
                 'success': False, 
                 'error': 'ZIP file path not set in job metadata'
             }), 404
+        
+        # Convert relative path to absolute if needed
+        zip_path_obj = Path(zip_path)
+        if not zip_path_obj.is_absolute():
+            # Path is relative, make it absolute from BASE_DIR
+            from config.config import Config
+            zip_path = str(Config.BASE_DIR / zip_path)
+            print(f"Converted to absolute path: {zip_path}")
         
         if not os.path.exists(zip_path):
             # Try to find the ZIP file in case path is wrong

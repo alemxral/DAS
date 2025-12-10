@@ -130,7 +130,7 @@
 
     <!-- Create Job Modal -->
     <div id="createJobModal" class="modal fixed inset-0 bg-black bg-opacity-50 items-center justify-center z-50">
-        <div class="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+        <div class="bg-white rounded-lg shadow-xl max-w-4xl w-full mx-4 max-h-[90vh] overflow-y-auto">
             <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
                 <h3 class="text-xl font-semibold text-gray-900">Create New Job</h3>
                 <button onclick="closeCreateJobModal()" class="text-gray-400 hover:text-gray-600">
@@ -158,7 +158,7 @@
                         </div>
                         <div id="template-path-input" style="display:none;">
                             <div class="flex space-x-2">
-                                <input type="text" id="template_path" name="template_path" placeholder="C:\path\to\template.docx" class="block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500">
+                                <input type="text" id="template_path" name="template_path" placeholder="C:\path\to\template.docx" class="block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500" oninput="toggleExcelPrintSettings()">
                                 <button type="button" onclick="browseTemplatePath()" class="px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg whitespace-nowrap">
                                     <i class="fas fa-folder-open mr-1"></i> Browse
                                 </button>
@@ -196,13 +196,27 @@
                     </div>
                 </div>
 
+                <!-- Filename Variable -->
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">
+                        Filename Variable (Optional)
+                        <span class="text-gray-500 text-xs ml-1">Column in Excel data to use for output filenames</span>
+                    </label>
+                    <input type="text" id="filename_variable" name="filename_variable" placeholder="##filename##" value="##filename##" class="block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500">
+                    <p class="mt-1 text-xs text-gray-500">Must match format: ##variablename## (e.g., ##filename##, ##reportname##, ##docid##)</p>
+                </div>
+
                 <!-- Output Formats -->
                 <div>
                     <h4 class="text-lg font-medium text-gray-900 mb-3">Output Formats</h4>
                     <div class="grid grid-cols-2 gap-3">
                         <label class="flex items-center p-3 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50">
                             <input type="checkbox" name="output_formats" value="pdf" checked class="form-checkbox h-5 w-5 text-blue-600" onchange="toggleExcelPrintSettings()">
-                            <span class="ml-2">PDF</span>
+                            <span class="ml-2">PDF (Individual)</span>
+                        </label>
+                        <label class="flex items-center p-3 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50">
+                            <input type="checkbox" name="output_formats" value="pdf_merged" class="form-checkbox h-5 w-5 text-blue-600" onchange="toggleExcelPrintSettings()">
+                            <span class="ml-2">PDF (Merged)</span>
                         </label>
                         <label class="flex items-center p-3 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50">
                             <input type="checkbox" name="output_formats" value="word" class="form-checkbox h-5 w-5 text-blue-600">
@@ -313,6 +327,10 @@
                             <label class="block text-sm font-medium text-gray-700 mb-2">Scaling</label>
                             <div class="space-y-2">
                                 <label class="flex items-center">
+                                    <input type="radio" name="scaling_type" value="no_scaling" class="form-radio" onchange="toggleScalingInputs()">
+                                    <span class="ml-2 text-sm">No Scaling (100%)</span>
+                                </label>
+                                <label class="flex items-center">
                                     <input type="radio" name="scaling_type" value="percent" checked class="form-radio" onchange="toggleScalingInputs()">
                                     <span class="ml-2 text-sm">Scale to:</span>
                                     <input type="number" id="scale_percent" min="10" max="400" value="100" class="ml-2 w-20 px-2 py-1 border border-gray-300 rounded text-sm">
@@ -325,6 +343,18 @@
                                     <span class="ml-1 text-sm">page(s) wide by</span>
                                     <input type="number" id="fit_height" min="1" value="1" class="ml-2 w-16 px-2 py-1 border border-gray-300 rounded text-sm" disabled>
                                     <span class="ml-1 text-sm">tall</span>
+                                </label>
+                                <label class="flex items-center">
+                                    <input type="radio" name="scaling_type" value="fit_sheet_on_one_page" class="form-radio" onchange="toggleScalingInputs()">
+                                    <span class="ml-2 text-sm">Fit Sheet on One Page</span>
+                                </label>
+                                <label class="flex items-center">
+                                    <input type="radio" name="scaling_type" value="fit_all_columns_on_one_page" class="form-radio" onchange="toggleScalingInputs()">
+                                    <span class="ml-2 text-sm">Fit All Columns on One Page</span>
+                                </label>
+                                <label class="flex items-center">
+                                    <input type="radio" name="scaling_type" value="fit_all_rows_on_one_page" class="form-radio" onchange="toggleScalingInputs()">
+                                    <span class="ml-2 text-sm">Fit All Rows on One Page</span>
                                 </label>
                             </div>
                         </div>

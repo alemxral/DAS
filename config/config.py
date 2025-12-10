@@ -45,7 +45,7 @@ class Config:
     ALLOWED_DATA_EXTENSIONS = {'.xlsx', '.xls'}
     
     # Output format settings
-    AVAILABLE_OUTPUT_FORMATS = ['pdf', 'word', 'excel', 'excel_workbook', 'msg']
+    AVAILABLE_OUTPUT_FORMATS = ['pdf', 'pdf_merged', 'word', 'excel', 'excel_workbook', 'msg']
     
     # Processing settings
     MAX_CONCURRENT_JOBS = int(os.getenv('MAX_CONCURRENT_JOBS', '5'))

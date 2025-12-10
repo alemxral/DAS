@@ -255,6 +255,12 @@ async function handleCreateJob(e) {
     formData.append('output_formats', formats.join(','));
     formData.append('auto_process', 'true');
     
+    // Add filename variable if specified
+    const filenameVariable = document.getElementById('filename_variable').value.trim();
+    if (filenameVariable) {
+        formData.append('filename_variable', filenameVariable);
+    }
+    
     // Add Excel print settings if applicable
     const excelPrintSettings = getExcelPrintSettings();
     if (excelPrintSettings) {
@@ -432,27 +438,30 @@ async function editJob(jobId) {
         const response = await fetch(`${API_BASE}/jobs/${jobId}`);
         const data = await response.json();
         
+        console.log('Edit job response:', data);
+        
         if (data.success && data.job) {
             const job = data.job;
+            console.log('Job data:', job);
             
             // Open modal
             openCreateJobModal();
             
             // Store job ID for updating
-            document.getElementById('jobForm').dataset.editingJobId = jobId;
+            document.getElementById('createJobForm').dataset.editingJobId = jobId;
             document.querySelector('#createJobModal h3').textContent = 'Edit Job';
             
             // Populate template
             if (job.template_path) {
                 document.querySelector('input[name="template_source"][value="path"]').checked = true;
-                toggleTemplateSource();
+                toggleTemplateInput();
                 document.getElementById('template_path').value = job.template_path;
             }
             
             // Populate data
             if (job.data_path) {
                 document.querySelector('input[name="data_source"][value="path"]').checked = true;
-                toggleDataSource();
+                toggleDataInput();
                 document.getElementById('data_path').value = job.data_path;
             }
             
@@ -460,6 +469,11 @@ async function editJob(jobId) {
             document.querySelectorAll('input[name="output_formats"]').forEach(cb => {
                 cb.checked = job.output_formats.includes(cb.value);
             });
+            
+            // Populate filename variable
+            if (job.metadata && job.metadata.filename_variable) {
+                document.getElementById('filename_variable').value = job.metadata.filename_variable;
+            }
             
             // Populate output directory
             if (job.output_directory) {
@@ -476,7 +490,7 @@ async function editJob(jobId) {
                     document.querySelector(`input[name="orientation"][value="${settings.orientation}"]`).checked = true;
                 }
                 if (settings.paper_size) {
-                    document.querySelector(`input[name="paper_size"][value="${settings.paper_size}"]`).checked = true;
+                    document.getElementById('paper_size').value = settings.paper_size;
                 }
                 if (settings.margins) {
                     document.getElementById('margin_left').value = settings.margins.left || 0.75;
@@ -485,14 +499,20 @@ async function editJob(jobId) {
                     document.getElementById('margin_bottom').value = settings.margins.bottom || 1.0;
                 }
                 if (settings.scaling) {
-                    document.querySelector(`input[name="scaling_type"][value="${settings.scaling.type}"]`).checked = true;
+                    const scalingType = settings.scaling.type || 'percent';
+                    const scalingRadio = document.querySelector(`input[name="scaling_type"][value="${scalingType}"]`);
+                    if (scalingRadio) {
+                        scalingRadio.checked = true;
+                    }
                     toggleScalingInputs();
-                    if (settings.scaling.type === 'percent') {
-                        document.getElementById('scaling_percent').value = settings.scaling.value || 100;
-                    } else {
+                    
+                    if (scalingType === 'percent') {
+                        document.getElementById('scale_percent').value = settings.scaling.value || 100;
+                    } else if (scalingType === 'fit_to') {
                         document.getElementById('fit_width').value = settings.scaling.width || 1;
                         document.getElementById('fit_height').value = settings.scaling.height || 1;
                     }
+                    // Other scaling types (no_scaling, fit_sheet_on_one_page, etc.) don't need input values
                 }
                 if (settings.center_horizontally) {
                     document.getElementById('center_h').checked = true;
@@ -792,10 +812,11 @@ function toggleExcelPrintSettings() {
     
     // Check if template is Excel and PDF is selected in output formats
     const pdfChecked = document.querySelector('input[name="output_formats"][value="pdf"]')?.checked;
+    const pdfMergedChecked = document.querySelector('input[name="output_formats"][value="pdf_merged"]')?.checked;
     const isExcelTemplate = isExcelTemplateSelected();
     
-    // Only show if BOTH conditions are met: Excel template AND PDF output selected
-    settingsDiv.style.display = (pdfChecked && isExcelTemplate) ? 'block' : 'none';
+    // Show if Excel template AND (individual PDF OR merged PDF is selected)
+    settingsDiv.style.display = ((pdfChecked || pdfMergedChecked) && isExcelTemplate) ? 'block' : 'none';
 }
 
 // Check if selected template is Excel
@@ -826,14 +847,20 @@ function toggleScalingInputs() {
     const widthInput = document.getElementById('fit_width');
     const heightInput = document.getElementById('fit_height');
     
+    // Enable/disable inputs based on scaling type
     if (scalingType === 'percent') {
         percentInput.disabled = false;
         widthInput.disabled = true;
         heightInput.disabled = true;
-    } else {
+    } else if (scalingType === 'fit_to') {
         percentInput.disabled = true;
         widthInput.disabled = false;
         heightInput.disabled = false;
+    } else {
+        // For no_scaling, fit_sheet_on_one_page, fit_all_columns_on_one_page, fit_all_rows_on_one_page
+        percentInput.disabled = true;
+        widthInput.disabled = true;
+        heightInput.disabled = true;
     }
 }
 

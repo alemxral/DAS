@@ -77,10 +77,14 @@ class Job:
         Returns:
             Dictionary representation of the job
         """
+        # Get actual paths from metadata if available, otherwise use the original paths
+        actual_template_path = self.metadata.get('job_template_path', self.template_path)
+        actual_data_path = self.metadata.get('job_data_path', self.data_path)
+        
         return {
             'id': self.id,
-            'template_path': self.template_path,
-            'data_path': self.data_path,
+            'template_path': actual_template_path,
+            'data_path': actual_data_path,
             'output_formats': self.output_formats,
             'status': self.status.value,
             'created_at': self.created_at.isoformat(),

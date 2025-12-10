@@ -77,7 +77,8 @@ class JobManager:
         data_path: str,
         output_formats: List[str],
         excel_print_settings: Optional[Dict] = None,
-        output_directory: Optional[str] = None
+        output_directory: Optional[str] = None,
+        filename_variable: str = '##filename##'
     ) -> Job:
         """
         Create a new job.
@@ -86,6 +87,9 @@ class JobManager:
             template_path: Path to template file
             data_path: Path to data file
             output_formats: List of desired output formats
+            excel_print_settings: Optional Excel print settings for PDF conversion
+            output_directory: Optional custom output directory
+            filename_variable: Variable to use for output filenames (default: ##filename##)
             
         Returns:
             Created Job instance
@@ -103,6 +107,9 @@ class JobManager:
         # Store custom output directory
         if output_directory:
             job.output_directory = output_directory
+        
+        # Store filename variable
+        job.metadata['filename_variable'] = filename_variable
         
         # Create job directory
         job_dir = self.get_job_dir(job.id)
@@ -208,9 +215,31 @@ class JobManager:
             # Process each data row
             for idx, row_data in enumerate(data_result['data'], start=1):
                 try:
+                    # Determine output filename
+                    # Check for ##filename## variable or custom filename variable in job metadata
+                    filename_var = job.metadata.get('filename_variable', '##filename##')
+                    # Remove the ## markers to get the key
+                    filename_key = filename_var.replace('##', '')
+                    
+                    # Try to get custom filename from row data
+                    custom_filename = None
+                    if filename_key in row_data and row_data[filename_key]:
+                        custom_filename = str(row_data[filename_key]).strip()
+                        # Sanitize filename - remove invalid characters
+                        invalid_chars = '<>:"/\\|?*'
+                        for char in invalid_chars:
+                            custom_filename = custom_filename.replace(char, '_')
+                    
+                    # Use custom filename or default to processed_{idx}
+                    if custom_filename:
+                        base_filename = custom_filename
+                    else:
+                        base_filename = f"processed_{idx}"
+                    
                     # Generate document from template
-                    processed_doc = output_dir / f"processed_{idx}{Path(job.metadata['job_template_path']).suffix}"
-                    print(f"Processing row {idx}: Generating from template...")
+                    template_ext = Path(job.metadata['job_template_path']).suffix
+                    processed_doc = output_dir / f"{base_filename}{template_ext}"
+                    print(f"Processing row {idx}: Generating {base_filename}{template_ext}...")
                     
                     self.template_processor.process_template(
                         job.metadata['job_template_path'],
@@ -226,6 +255,10 @@ class JobManager:
                     
                     # Convert to requested formats
                     for output_format in job.output_formats:
+                        # Skip pdf_merged format in loop - will be handled after all files are processed
+                        if output_format == 'pdf_merged':
+                            continue
+                        
                         format_dir = output_dir / output_format
                         format_dir.mkdir(parents=True, exist_ok=True)
                         
@@ -280,6 +313,37 @@ class JobManager:
             output_files_exist = any(output_dir.rglob('*.*'))
             if not output_files_exist:
                 raise RuntimeError(f"No output files were generated in {output_dir}")
+            
+            # Handle PDF merging if pdf_merged format was requested
+            if 'pdf_merged' in job.output_formats:
+                # Check if individual PDFs were also requested
+                if 'pdf' not in job.output_formats:
+                    # Need to create temporary PDFs for merging
+                    print(f"Job {job.id}: Creating PDFs for merging...")
+                    temp_pdf_dir = output_dir / 'pdf'
+                    temp_pdf_dir.mkdir(parents=True, exist_ok=True)
+                    
+                    # Convert all processed documents to PDF
+                    for processed_file in output_dir.glob(f"processed_*{Path(job.metadata['job_template_path']).suffix}"):
+                        try:
+                            print_settings = None
+                            if job.excel_print_settings:
+                                template_ext = Path(job.metadata['job_template_path']).suffix.lower()
+                                if template_ext in ['.xlsx', '.xls']:
+                                    print_settings = job.excel_print_settings
+                            
+                            output_file = self.format_converter.convert(
+                                str(processed_file),
+                                'pdf',
+                                str(temp_pdf_dir),
+                                print_settings
+                            )
+                            print(f"Job {job.id}: Created PDF for merging: {output_file}")
+                        except Exception as e:
+                            print(f"Job {job.id}: Error creating PDF for merging: {str(e)}")
+                
+                print(f"Job {job.id}: Merging PDF files...")
+                self._merge_pdfs(output_dir, job)
             
             print(f"Job {job.id}: Creating ZIP archive...")
             
@@ -362,12 +426,22 @@ class JobManager:
             job_id: Job ID
             
         Returns:
-            ZIP file path or None
+            ZIP file path or None (returns absolute path)
         """
         job = self.get_job(job_id)
         if not job:
             return None
-        return job.zip_file_path
+        
+        if not job.zip_file_path:
+            return None
+        
+        # Ensure the path is absolute
+        zip_path = Path(job.zip_file_path)
+        if not zip_path.is_absolute():
+            # Convert relative path to absolute
+            zip_path = self.jobs_dir.parent / job.zip_file_path
+        
+        return str(zip_path)
     
     def check_and_update_files(self, job_id: str) -> Dict:
         """
@@ -408,6 +482,61 @@ class JobManager:
             updates['error'] = str(e)
         
         return updates
+    
+    def _merge_pdfs(self, output_dir: Path, job: Job):
+        """
+        Merge all PDF files from the pdf directory into a single merged.pdf.
+        
+        Args:
+            output_dir: Output directory containing format subdirectories
+            job: Job instance
+        """
+        from PyPDF2 import PdfMerger
+        
+        # Check if we have individual PDFs to merge
+        pdf_dir = output_dir / 'pdf'
+        if not pdf_dir.exists():
+            print(f"Job {job.id}: No PDF directory found to merge")
+            return
+        
+        # Get all PDF files sorted by name
+        pdf_files = sorted(pdf_dir.glob('*.pdf'))
+        if not pdf_files:
+            print(f"Job {job.id}: No PDF files found to merge")
+            return
+        
+        # Create pdf_merged directory
+        merged_dir = output_dir / 'pdf_merged'
+        merged_dir.mkdir(parents=True, exist_ok=True)
+        merged_file = merged_dir / 'merged.pdf'
+        
+        try:
+            # Create merger and add all PDFs
+            merger = PdfMerger()
+            
+            for pdf_file in pdf_files:
+                print(f"Job {job.id}: Adding {pdf_file.name} to merged PDF")
+                merger.append(str(pdf_file))
+            
+            # Write merged PDF
+            merger.write(str(merged_file))
+            merger.close()
+            
+            # Verify merged file was created
+            if not merged_file.exists():
+                raise RuntimeError(f"Failed to create merged PDF: {merged_file}")
+            
+            merged_size = merged_file.stat().st_size
+            print(f"Job {job.id}: Merged PDF created successfully ({merged_size} bytes, {len(pdf_files)} files merged)")
+            
+            # Add to job output files
+            job.add_output_file(str(merged_file))
+            
+        except Exception as e:
+            print(f"Job {job.id}: Error merging PDFs: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            # Don't fail the entire job if merge fails
     
     def get_dashboard_stats(self) -> Dict:
         """
