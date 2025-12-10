@@ -324,12 +324,20 @@ class JobManager:
                     temp_pdf_dir.mkdir(parents=True, exist_ok=True)
                     
                     # Convert all processed documents to PDF
-                    for processed_file in output_dir.glob(f"processed_*{Path(job.metadata['job_template_path']).suffix}"):
+                    # Get template extension
+                    template_ext = Path(job.metadata['job_template_path']).suffix
+                    
+                    # Find all processed files with the template extension
+                    processed_files = sorted(output_dir.glob(f"*{template_ext}"))
+                    
+                    if not processed_files:
+                        print(f"Job {job.id}: Warning - No processed files found for PDF merging")
+                    
+                    for processed_file in processed_files:
                         try:
                             print_settings = None
                             if job.excel_print_settings:
-                                template_ext = Path(job.metadata['job_template_path']).suffix.lower()
-                                if template_ext in ['.xlsx', '.xls']:
+                                if template_ext.lower() in ['.xlsx', '.xls']:
                                     print_settings = job.excel_print_settings
                             
                             output_file = self.format_converter.convert(
@@ -340,7 +348,9 @@ class JobManager:
                             )
                             print(f"Job {job.id}: Created PDF for merging: {output_file}")
                         except Exception as e:
-                            print(f"Job {job.id}: Error creating PDF for merging: {str(e)}")
+                            print(f"Job {job.id}: Error creating PDF for merging {processed_file.name}: {str(e)}")
+                            import traceback
+                            traceback.print_exc()
                 
                 print(f"Job {job.id}: Merging PDF files...")
                 self._merge_pdfs(output_dir, job)

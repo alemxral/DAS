@@ -339,12 +339,15 @@ def rerun_job(job_id):
             return jsonify({'success': False, 'error': 'Job not found'}), 404
         
         # Create new job with same settings
+        filename_variable = original_job.metadata.get('filename_variable', '##filename##')
+        
         new_job = manager.create_job(
             template_path=original_job.template_path,
             data_path=original_job.data_path,
             output_formats=original_job.output_formats,
             excel_print_settings=original_job.excel_print_settings,
-            output_directory=original_job.output_directory
+            output_directory=original_job.output_directory,
+            filename_variable=filename_variable
         )
         
         # Start processing

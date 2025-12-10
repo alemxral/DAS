@@ -274,8 +274,10 @@ async function handleCreateJob(e) {
     }
     
     try {
-        const url = isEditing ? `${API_BASE}/jobs/${editingJobId}` : `${API_BASE}/jobs`;
-        const method = isEditing ? 'PUT' : 'POST';
+        // Always create a new job - don't try to update existing jobs
+        // This allows "editing" completed jobs by creating a new one with the same settings
+        const url = `${API_BASE}/jobs`;
+        const method = 'POST';
         
         const response = await fetch(url, {
             method: method,
@@ -285,16 +287,16 @@ async function handleCreateJob(e) {
         const data = await response.json();
         
         if (data.success) {
-            showSuccess(isEditing ? 'Job updated successfully!' : 'Job created successfully!');
+            showSuccess('Job created successfully!');
             closeCreateJobModal();
             document.getElementById('createJobForm').reset();
             loadDashboardData();
         } else {
-            showError(data.error || (isEditing ? 'Failed to update job' : 'Failed to create job'));
+            showError(data.error || 'Failed to create job');
         }
     } catch (error) {
-        console.error(isEditing ? 'Error updating job:' : 'Error creating job:', error);
-        showError(isEditing ? 'Failed to update job' : 'Failed to create job');
+        console.error('Error creating job:', error);
+        showError('Failed to create job');
     }
 }
 
@@ -700,6 +702,10 @@ async function deleteJob(jobId) {
 // Modal functions
 function openCreateJobModal() {
     document.getElementById('createJobModal').classList.add('active');
+    // Delay Excel print settings check slightly to allow DOM to settle
+    setTimeout(() => {
+        toggleExcelPrintSettings();
+    }, 100);
 }
 
 function closeCreateJobModal() {
