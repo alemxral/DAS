@@ -100,6 +100,8 @@ class DocumentParser:
             data_rows = []
             for row in rows[1:]:
                 row_data = {}
+                has_any_value = False  # Track if row has any non-empty value
+                
                 for col_idx, cell in enumerate(row):
                     if col_idx >= len(variables):
                         break
@@ -114,8 +116,14 @@ class DocumentParser:
                     # Format cell value based on its number format
                     formatted_value = self._format_cell_value(cell)
                     row_data[var_name] = formatted_value
+                    
+                    # Check if this cell has a meaningful value
+                    if formatted_value and str(formatted_value).strip():
+                        has_any_value = True
                 
-                data_rows.append(row_data)
+                # Only add row if it has at least one non-empty value
+                if has_any_value:
+                    data_rows.append(row_data)
             
             wb.close()
             
@@ -138,36 +146,126 @@ class DocumentParser:
             cell: openpyxl cell object
             
         Returns:
-            Formatted string value
+            Formatted string value preserving the original Excel display format
         """
         from datetime import datetime
+        from openpyxl.styles.numbers import BUILTIN_FORMATS
         
         value = cell.value
         number_format = cell.number_format
         
-        # Handle dates
-        if isinstance(value, datetime):
-            return value.strftime('%Y-%m-%d %H:%M:%S') if value.hour or value.minute or value.second else value.strftime('%Y-%m-%d')
+        # If value is None or empty, return empty string
+        if value is None or value == '':
+            return ''
         
-        # Handle percentages
-        if number_format and '%' in number_format:
-            if isinstance(value, (int, float)):
-                return f"{value * 100:.2f}%"
+        # Try to use Excel's formatted value directly if available
+        # This preserves the exact format as displayed in Excel
+        try:
+            # For dates, use the cell's number format to determine output format
+            if isinstance(value, datetime):
+                if number_format and number_format != 'General':
+                    # Common date formats mapping
+                    if 'dd/mm/yyyy' in number_format.lower() or 'd/m/y' in number_format.lower():
+                        return value.strftime('%d/%m/%Y')
+                    elif 'mm/dd/yyyy' in number_format.lower() or 'm/d/y' in number_format.lower():
+                        return value.strftime('%m/%d/%Y')
+                    elif 'yyyy-mm-dd' in number_format.lower():
+                        return value.strftime('%Y-%m-%d')
+                    elif 'dd-mm-yyyy' in number_format.lower():
+                        return value.strftime('%d-%m-%Y')
+                    elif 'mmmm' in number_format.lower():
+                        return value.strftime('%B %d, %Y')
+                    # Check for time component
+                    if 'h' in number_format.lower() or 's' in number_format.lower():
+                        return value.strftime('%d/%m/%Y %H:%M:%S')
+                # Default date format preserving day/month/year order
+                return value.strftime('%d/%m/%Y')
+            
+            # Handle numbers with specific formats
+            if isinstance(value, (int, float)) and number_format and number_format != 'General':
+                # Handle percentages
+                if '%' in number_format:
+                    # Count decimal places in format
+                    if '.0' in number_format:
+                        decimals = number_format.count('0', number_format.index('.'))
+                        return f"{value * 100:.{decimals}f}%"
+                    return f"{value * 100:.0f}%"
+                
+                # Handle currency formats
+                if any(sym in number_format for sym in ['$', '€', '£', '¥', '₹']):
+                    currency_symbol = '$'
+                    for sym in ['$', '€', '£', '¥', '₹']:
+                        if sym in number_format:
+                            currency_symbol = sym
+                            break
+                    
+                    # Check for thousands separator
+                    if '#,##0' in number_format or '#.##0' in number_format or '# ##0' in number_format:
+                        # Determine thousands separator from format
+                        thousands_sep = ','
+                        if '#.##0' in number_format or '. ' in number_format:
+                            thousands_sep = '.'
+                        elif '# ##0' in number_format:
+                            thousands_sep = ' '
+                        
+                        # Determine decimal places
+                        if '.00' in number_format or ',00' in number_format:
+                            return f"{currency_symbol}{value:,.2f}".replace(',', 'TEMP').replace('.', thousands_sep).replace('TEMP', '.')
+                        return f"{currency_symbol}{value:,.0f}".replace(',', thousands_sep)
+                    return f"{currency_symbol}{value:.2f}"
+                
+                # Handle numbers with thousands separator
+                if '#,##0' in number_format or '#.##0' in number_format or '# ##0' in number_format:
+                    # Determine separators from format
+                    thousands_sep = ','
+                    decimal_sep = '.'
+                    
+                    if '#.##0' in number_format:
+                        thousands_sep = '.'
+                        decimal_sep = ','
+                    elif '# ##0' in number_format:
+                        thousands_sep = ' '
+                        decimal_sep = '.'
+                    
+                    # Count decimal places
+                    decimal_places = 0
+                    if '.0' in number_format or ',0' in number_format:
+                        # Count zeros after decimal point
+                        after_decimal = number_format.split('.')[-1] if '.' in number_format else number_format.split(',')[-1]
+                        decimal_places = after_decimal.count('0')
+                    
+                    # Format the number
+                    if decimal_places > 0:
+                        # Format with decimals
+                        formatted = f"{value:,.{decimal_places}f}"
+                        # Replace separators
+                        if thousands_sep != ',' or decimal_sep != '.':
+                            formatted = formatted.replace(',', 'TEMP_THOUSANDS')
+                            formatted = formatted.replace('.', decimal_sep)
+                            formatted = formatted.replace('TEMP_THOUSANDS', thousands_sep)
+                        return formatted
+                    else:
+                        # Integer format
+                        formatted = f"{int(value):,}"
+                        if thousands_sep != ',':
+                            formatted = formatted.replace(',', thousands_sep)
+                        return formatted
+            
+            # Handle plain integers
+            if isinstance(value, int):
+                return str(value)
+            
+            # Handle floats - preserve original precision
+            if isinstance(value, float):
+                # Check if it's effectively a whole number
+                if value.is_integer():
+                    return str(int(value))
+                # Otherwise preserve the value as-is
+                return str(value)
         
-        # Handle currency
-        if number_format and any(sym in number_format for sym in ['$', '€', '£', '¥']):
-            if isinstance(value, (int, float)):
-                # Extract currency symbol
-                currency_symbol = '$' if '$' in number_format else '€' if '€' in number_format else '£' if '£' in number_format else '¥'
-                return f"{currency_symbol}{value:,.2f}"
-        
-        # Handle numbers with decimals
-        if isinstance(value, float):
-            # Check if it's a whole number
-            if value.is_integer():
-                return str(int(value))
-            else:
-                return f"{value:.2f}"
+        except Exception as e:
+            # If formatting fails, fall back to string representation
+            pass
         
         # Default: convert to string
         return str(value)

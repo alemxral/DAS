@@ -78,7 +78,8 @@ class JobManager:
         output_formats: List[str],
         excel_print_settings: Optional[Dict] = None,
         output_directory: Optional[str] = None,
-        filename_variable: str = '##filename##'
+        filename_variable: str = '##filename##',
+        tabname_variable: str = '##tabname##'
     ) -> Job:
         """
         Create a new job.
@@ -90,6 +91,7 @@ class JobManager:
             excel_print_settings: Optional Excel print settings for PDF conversion
             output_directory: Optional custom output directory
             filename_variable: Variable to use for output filenames (default: ##filename##)
+            tabname_variable: Variable to use for Excel workbook tab names (default: ##tabname##)
             
         Returns:
             Created Job instance
@@ -110,6 +112,9 @@ class JobManager:
         
         # Store filename variable
         job.metadata['filename_variable'] = filename_variable
+        
+        # Store tabname variable
+        job.metadata['tabname_variable'] = tabname_variable
         
         # Create job directory
         job_dir = self.get_job_dir(job.id)
@@ -255,8 +260,8 @@ class JobManager:
                     
                     # Convert to requested formats
                     for output_format in job.output_formats:
-                        # Skip pdf_merged format in loop - will be handled after all files are processed
-                        if output_format == 'pdf_merged':
+                        # Skip pdf_merged and excel_workbook formats in loop - will be handled after all files are processed
+                        if output_format in ['pdf_merged', 'excel_workbook']:
                             continue
                         
                         format_dir = output_dir / output_format
@@ -354,6 +359,41 @@ class JobManager:
                 
                 print(f"Job {job.id}: Merging PDF files...")
                 self._merge_pdfs(output_dir, job)
+            
+            # Handle Excel workbook merging if excel_workbook format was requested
+            if 'excel_workbook' in job.output_formats:
+                # Check if individual Excel files were also requested
+                if 'excel' not in job.output_formats:
+                    # Need to create temporary Excel files for merging
+                    print(f"Job {job.id}: Creating Excel files for workbook merging...")
+                    temp_excel_dir = output_dir / 'excel'
+                    temp_excel_dir.mkdir(parents=True, exist_ok=True)
+                    
+                    # Get template extension
+                    template_ext = Path(job.metadata['job_template_path']).suffix
+                    
+                    # Find all processed files with the template extension
+                    processed_files = sorted(output_dir.glob(f"*{template_ext}"))
+                    
+                    if not processed_files:
+                        print(f"Job {job.id}: Warning - No processed files found for workbook merging")
+                    
+                    for processed_file in processed_files:
+                        try:
+                            output_file = self.format_converter.convert(
+                                str(processed_file),
+                                'excel',
+                                str(temp_excel_dir),
+                                None
+                            )
+                            print(f"Job {job.id}: Created Excel file for workbook: {output_file}")
+                        except Exception as e:
+                            print(f"Job {job.id}: Error creating Excel file for workbook {processed_file.name}: {str(e)}")
+                            import traceback
+                            traceback.print_exc()
+                
+                print(f"Job {job.id}: Merging Excel files into workbook...")
+                self._merge_excel_workbook(output_dir, job)
             
             print(f"Job {job.id}: Creating ZIP archive...")
             
@@ -547,6 +587,167 @@ class JobManager:
             import traceback
             traceback.print_exc()
             # Don't fail the entire job if merge fails
+    
+    def _merge_excel_workbook(self, output_dir: Path, job: Job):
+        """
+        Merge all Excel files from the excel directory into a single workbook with tabs.
+        
+        Args:
+            output_dir: Output directory containing format subdirectories
+            job: Job instance
+        """
+        from openpyxl import Workbook, load_workbook
+        
+        # Check if we have individual Excel files to merge
+        excel_dir = output_dir / 'excel'
+        if not excel_dir.exists():
+            print(f"Job {job.id}: No Excel directory found to merge")
+            return
+        
+        # Get all Excel files sorted by name
+        excel_files = sorted(excel_dir.glob('*.xlsx'))
+        if not excel_files:
+            print(f"Job {job.id}: No Excel files found to merge")
+            return
+        
+        # Create excel_workbook directory
+        workbook_dir = output_dir / 'excel_workbook'
+        workbook_dir.mkdir(parents=True, exist_ok=True)
+        workbook_file = workbook_dir / 'workbook.xlsx'
+        
+        try:
+            # Get tabname variable from job metadata (default: ##tabname##)
+            tabname_variable = job.metadata.get('tabname_variable', '##tabname##')
+            
+            # Get the data records to extract tab names
+            data_records = job.metadata.get('data_records', [])
+            
+            # Create new workbook
+            wb = Workbook()
+            # Remove the default sheet
+            wb.remove(wb.active)
+            
+            used_tab_names = set()
+            
+            # Process each Excel file
+            for idx, excel_file in enumerate(excel_files):
+                print(f"Job {job.id}: Adding {excel_file.name} to workbook")
+                
+                # Load the source workbook
+                source_wb = load_workbook(excel_file)
+                
+                # Get the first (and usually only) sheet
+                source_sheet = source_wb.active
+                
+                # Determine tab name
+                tab_name = self._get_tab_name(
+                    data_records[idx] if idx < len(data_records) else {},
+                    tabname_variable,
+                    idx,
+                    used_tab_names
+                )
+                
+                # Create new sheet in target workbook
+                target_sheet = wb.create_sheet(title=tab_name)
+                
+                # Copy all cells from source to target
+                for row in source_sheet.iter_rows():
+                    for cell in row:
+                        target_cell = target_sheet.cell(
+                            row=cell.row,
+                            column=cell.column,
+                            value=cell.value
+                        )
+                        
+                        # Copy cell formatting
+                        if cell.has_style:
+                            target_cell.font = cell.font.copy()
+                            target_cell.border = cell.border.copy()
+                            target_cell.fill = cell.fill.copy()
+                            target_cell.number_format = cell.number_format
+                            target_cell.protection = cell.protection.copy()
+                            target_cell.alignment = cell.alignment.copy()
+                
+                # Copy column dimensions
+                for col in source_sheet.column_dimensions:
+                    if col in source_sheet.column_dimensions:
+                        target_sheet.column_dimensions[col].width = source_sheet.column_dimensions[col].width
+                
+                # Copy row dimensions
+                for row in source_sheet.row_dimensions:
+                    if row in source_sheet.row_dimensions:
+                        target_sheet.row_dimensions[row].height = source_sheet.row_dimensions[row].height
+                
+                # Copy merged cells
+                for merged_cell_range in source_sheet.merged_cells.ranges:
+                    target_sheet.merge_cells(str(merged_cell_range))
+                
+                source_wb.close()
+            
+            # Save the workbook
+            wb.save(str(workbook_file))
+            wb.close()
+            
+            # Verify workbook file was created
+            if not workbook_file.exists():
+                raise RuntimeError(f"Failed to create merged workbook: {workbook_file}")
+            
+            workbook_size = workbook_file.stat().st_size
+            print(f"Job {job.id}: Merged workbook created successfully ({workbook_size} bytes, {len(excel_files)} tabs)")
+            
+            # Add to job output files
+            job.add_output_file(str(workbook_file))
+            
+        except Exception as e:
+            print(f"Job {job.id}: Error merging Excel workbook: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            # Don't fail the entire job if merge fails
+    
+    def _get_tab_name(self, data_record: Dict, tabname_variable: str, index: int, used_names: set) -> str:
+        """
+        Generate a valid Excel tab name from data record.
+        
+        Args:
+            data_record: Dictionary with data for this row
+            tabname_variable: Variable name to look up (e.g., '##tabname##')
+            index: Row index (0-based) for fallback naming
+            used_names: Set of already used tab names to avoid duplicates
+            
+        Returns:
+            Valid Excel tab name (max 31 chars, no invalid chars, unique)
+        """
+        # Try to get tab name from data record
+        tab_name = None
+        if tabname_variable:
+            # Remove ## markers to get variable name
+            var_name = tabname_variable.strip('#')
+            tab_name = data_record.get(var_name, '')
+        
+        # Fallback to Sheet{n} if no value found
+        if not tab_name:
+            tab_name = f"Sheet{index + 1}"
+        
+        # Sanitize tab name - Excel doesn't allow: \ / ? * [ ] :
+        invalid_chars = ['\\', '/', '?', '*', '[', ']', ':']
+        for char in invalid_chars:
+            tab_name = tab_name.replace(char, '_')
+        
+        # Trim to max 31 characters (Excel limit)
+        tab_name = tab_name[:31]
+        
+        # Handle duplicates by appending number
+        original_name = tab_name
+        counter = 1
+        while tab_name in used_names:
+            suffix = f"_{counter}"
+            # Make sure we don't exceed 31 chars with suffix
+            max_base_len = 31 - len(suffix)
+            tab_name = original_name[:max_base_len] + suffix
+            counter += 1
+        
+        used_names.add(tab_name)
+        return tab_name
     
     def get_dashboard_stats(self) -> Dict:
         """

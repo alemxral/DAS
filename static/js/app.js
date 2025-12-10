@@ -261,6 +261,12 @@ async function handleCreateJob(e) {
         formData.append('filename_variable', filenameVariable);
     }
     
+    // Add tabname variable if specified
+    const tabnameVariable = document.getElementById('tabname_variable').value.trim();
+    if (tabnameVariable) {
+        formData.append('tabname_variable', tabnameVariable);
+    }
+    
     // Add Excel print settings if applicable
     const excelPrintSettings = getExcelPrintSettings();
     if (excelPrintSettings) {
@@ -476,6 +482,14 @@ async function editJob(jobId) {
             if (job.metadata && job.metadata.filename_variable) {
                 document.getElementById('filename_variable').value = job.metadata.filename_variable;
             }
+            
+            // Populate tabname variable
+            if (job.metadata && job.metadata.tabname_variable) {
+                document.getElementById('tabname_variable').value = job.metadata.tabname_variable;
+            }
+            
+            // Toggle tabname variable visibility based on output formats
+            toggleTabnameVariable();
             
             // Populate output directory
             if (job.output_directory) {
@@ -702,9 +716,10 @@ async function deleteJob(jobId) {
 // Modal functions
 function openCreateJobModal() {
     document.getElementById('createJobModal').classList.add('active');
-    // Delay Excel print settings check slightly to allow DOM to settle
+    // Delay settings check slightly to allow DOM to settle
     setTimeout(() => {
         toggleExcelPrintSettings();
+        toggleTabnameVariable();
     }, 100);
 }
 
@@ -844,6 +859,18 @@ function isExcelTemplateSelected() {
     }
     
     return false;
+}
+
+// Toggle tab name variable input visibility
+function toggleTabnameVariable() {
+    const container = document.getElementById('tabnameVariableContainer');
+    if (!container) return;
+    
+    // Check if excel_workbook is selected
+    const excelWorkbookChecked = document.querySelector('input[name="output_formats"][value="excel_workbook"]')?.checked;
+    
+    // Show if excel_workbook is selected
+    container.style.display = excelWorkbookChecked ? 'block' : 'none';
 }
 
 // Toggle scaling inputs

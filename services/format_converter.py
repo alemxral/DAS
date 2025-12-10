@@ -470,18 +470,14 @@ class FormatConverter:
         return output_path
     
     def _convert_to_excel_workbook(self, input_path: str, output_dir: str) -> str:
-        """Convert document to Excel workbook."""
-        input_ext = Path(input_path).suffix.lower()
-        base_name = Path(input_path).stem
-        output_path = os.path.join(output_dir, f"{base_name}_workbook.xlsx")
-        
-        if input_ext == '.xlsx':
-            # Already Excel workbook, just copy
-            shutil.copy2(input_path, output_path)
-        else:
-            raise ValueError(f"Cannot convert {input_ext} to Excel workbook")
-        
-        return output_path
+        """
+        Excel workbook conversion is handled by job_manager._merge_excel_workbook().
+        This method should not be called directly during individual file conversion.
+        """
+        raise RuntimeError(
+            "Excel workbook format should not be converted individually. "
+            "Workbook merging is handled by job_manager after all individual files are processed."
+        )
     
     def _convert_to_msg(self, input_path: str, output_dir: str) -> str:
         """Convert document to MSG format."""

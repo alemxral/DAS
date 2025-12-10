@@ -164,6 +164,9 @@ def create_job():
         # Get filename variable if provided
         filename_variable = request.form.get('filename_variable', '##filename##').strip()
         
+        # Get tabname variable if provided
+        tabname_variable = request.form.get('tabname_variable', '##tabname##').strip()
+        
         # Get output directory if provided
         output_directory = request.form.get('output_directory', '').strip()
         if output_directory and not os.path.exists(output_directory):
@@ -179,7 +182,8 @@ def create_job():
             output_formats=output_formats,
             excel_print_settings=excel_print_settings,
             output_directory=output_directory if output_directory else None,
-            filename_variable=filename_variable
+            filename_variable=filename_variable,
+            tabname_variable=tabname_variable
         )
         
         # Start processing in background thread
@@ -340,6 +344,7 @@ def rerun_job(job_id):
         
         # Create new job with same settings
         filename_variable = original_job.metadata.get('filename_variable', '##filename##')
+        tabname_variable = original_job.metadata.get('tabname_variable', '##tabname##')
         
         new_job = manager.create_job(
             template_path=original_job.template_path,
@@ -347,7 +352,8 @@ def rerun_job(job_id):
             output_formats=original_job.output_formats,
             excel_print_settings=original_job.excel_print_settings,
             output_directory=original_job.output_directory,
-            filename_variable=filename_variable
+            filename_variable=filename_variable,
+            tabname_variable=tabname_variable
         )
         
         # Start processing
