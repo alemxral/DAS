@@ -31,6 +31,62 @@ class DocumentParser:
             return []
         return self.VARIABLE_PATTERN.findall(text)
     
+    def get_excel_sheets(self, file_path: str) -> List[str]:
+        """
+        Get list of sheet names from Excel file.
+        
+        Args:
+            file_path: Path to Excel file
+            
+        Returns:
+            List of sheet names
+        """
+        if not Path(file_path).exists():
+            return []
+        
+        try:
+            import openpyxl
+            wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
+            sheets = wb.sheetnames
+            wb.close()
+            return sheets
+        except:
+            return []
+    
+    def detect_data_sheet(self, file_path: str) -> str:
+        """
+        Auto-detect the sheet containing ##variable## headers.
+        
+        Args:
+            file_path: Path to Excel file
+            
+        Returns:
+            Sheet name with ##variable## headers, or None if not found
+        """
+        if not Path(file_path).exists():
+            return None
+        
+        try:
+            import openpyxl
+            wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
+            
+            # Check each sheet for ##variable## pattern in first row
+            for sheet_name in wb.sheetnames:
+                ws = wb[sheet_name]
+                first_row = next(ws.iter_rows(min_row=1, max_row=1, values_only=True), None)
+                
+                if first_row:
+                    # Check if any cell contains ##variable## pattern
+                    for cell_value in first_row:
+                        if cell_value and isinstance(cell_value, str) and '##' in cell_value:
+                            wb.close()
+                            return sheet_name
+            
+            wb.close()
+            return None
+        except:
+            return None
+    
     def parse_excel_data(self, file_path: str, sheet_name: str = None) -> Dict:
         """
         Parse Excel file to extract variables and data.
@@ -63,14 +119,32 @@ class DocumentParser:
             # Load workbook with data_only=False to preserve formulas and formatting
             wb = openpyxl.load_workbook(file_path, data_only=True)
             
-            # Get the specified sheet or the first one
+            # Get the specified sheet or auto-detect
             if sheet_name:
                 if sheet_name not in wb.sheetnames:
                     raise ValueError(f"Sheet '{sheet_name}' not found in workbook")
                 ws = wb[sheet_name]
             else:
-                ws = wb.active
-                sheet_name = ws.title
+                # Try to auto-detect sheet with ##variable## headers
+                detected_sheet = None
+                for sname in wb.sheetnames:
+                    test_ws = wb[sname]
+                    first_row = next(test_ws.iter_rows(min_row=1, max_row=1, values_only=True), None)
+                    if first_row:
+                        for cell_value in first_row:
+                            if cell_value and isinstance(cell_value, str) and '##' in cell_value:
+                                detected_sheet = sname
+                                break
+                    if detected_sheet:
+                        break
+                
+                # Use detected sheet or fall back to active sheet
+                if detected_sheet:
+                    ws = wb[detected_sheet]
+                    sheet_name = detected_sheet
+                else:
+                    ws = wb.active
+                    sheet_name = ws.title
             
             # Get all rows
             rows = list(ws.iter_rows(values_only=False))

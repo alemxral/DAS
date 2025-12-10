@@ -139,7 +139,7 @@ class TemplateProcessor:
         
         return sorted(list(variables))
     
-    def process_template(self, template_path: str, data: Dict, output_path: str) -> str:
+    def process_template(self, template_path: str, data: Dict, output_path: str, sheet_name: str = None) -> str:
         """
         Process a template with data substitution.
         
@@ -147,6 +147,7 @@ class TemplateProcessor:
             template_path: Path to template file
             data: Dictionary mapping variable names to values
             output_path: Path for output file
+            sheet_name: Optional sheet name for Excel templates
             
         Returns:
             Path to the generated file
@@ -156,7 +157,7 @@ class TemplateProcessor:
         if ext == '.docx':
             return self._process_docx_template(template_path, data, output_path)
         elif ext == '.xlsx':
-            return self._process_xlsx_template(template_path, data, output_path)
+            return self._process_xlsx_template(template_path, data, output_path, sheet_name)
         elif ext == '.msg':
             return self._process_msg_template(template_path, data, output_path)
         else:
@@ -202,14 +203,26 @@ class TemplateProcessor:
         doc.save(output_path)
         return output_path
     
-    def _process_xlsx_template(self, template_path: str, data: Dict, output_path: str) -> str:
+    def _process_xlsx_template(self, template_path: str, data: Dict, output_path: str, sheet_name: str = None) -> str:
         """Process Excel template."""
         if openpyxl is None:
             raise ImportError("openpyxl is required for Excel templates")
         
         wb = openpyxl.load_workbook(template_path)
         
-        for sheet in wb.worksheets:
+        # Determine which sheets to process
+        sheets_to_process = []
+        if sheet_name:
+            # Process only the specified sheet
+            if sheet_name in wb.sheetnames:
+                sheets_to_process = [wb[sheet_name]]
+            else:
+                raise ValueError(f"Sheet '{sheet_name}' not found in template")
+        else:
+            # Process all sheets
+            sheets_to_process = wb.worksheets
+        
+        for sheet in sheets_to_process:
             for row in sheet.iter_rows():
                 for cell in row:
                     if cell.value and isinstance(cell.value, str):

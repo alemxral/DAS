@@ -79,7 +79,9 @@ class JobManager:
         excel_print_settings: Optional[Dict] = None,
         output_directory: Optional[str] = None,
         filename_variable: str = '##filename##',
-        tabname_variable: str = '##tabname##'
+        tabname_variable: str = '##tabname##',
+        data_sheet: Optional[str] = None,
+        template_sheet: Optional[str] = None
     ) -> Job:
         """
         Create a new job.
@@ -115,6 +117,12 @@ class JobManager:
         
         # Store tabname variable
         job.metadata['tabname_variable'] = tabname_variable
+        
+        # Store sheet names if provided
+        if data_sheet:
+            job.metadata['data_sheet'] = data_sheet
+        if template_sheet:
+            job.metadata['template_sheet'] = template_sheet
         
         # Create job directory
         job_dir = self.get_job_dir(job.id)
@@ -207,9 +215,11 @@ class JobManager:
         self.save_job_metadata(job)
         
         try:
-            # Parse data file
+            # Parse data file with optional sheet name
+            data_sheet = job.metadata.get('data_sheet', None)
             data_result = self.document_parser.parse_excel_data(
-                job.metadata['job_data_path']
+                job.metadata['job_data_path'],
+                sheet_name=data_sheet
             )
             job.total_records = data_result['total_rows']
             
@@ -246,10 +256,14 @@ class JobManager:
                     processed_doc = output_dir / f"{base_filename}{template_ext}"
                     print(f"Processing row {idx}: Generating {base_filename}{template_ext}...")
                     
+                    # Get template sheet if specified
+                    template_sheet = job.metadata.get('template_sheet', None)
+                    
                     self.template_processor.process_template(
                         job.metadata['job_template_path'],
                         row_data,
-                        str(processed_doc)
+                        str(processed_doc),
+                        sheet_name=template_sheet
                     )
                     
                     # Verify processed document was created

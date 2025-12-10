@@ -92,6 +92,56 @@ def get_job(job_id):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@api_bp.route('/excel/sheets', methods=['POST'])
+def get_excel_sheets():
+    """Get list of sheets from an Excel file."""
+    try:
+        from services.document_parser import DocumentParser
+        parser = DocumentParser()
+        
+        file_path = None
+        
+        # Handle file upload
+        if 'file' in request.files:
+            file = request.files['file']
+            if file and file.filename:
+                from werkzeug.utils import secure_filename
+                filename = secure_filename(file.filename)
+                upload_dir = Path(current_app.config['UPLOAD_DIR'])
+                upload_dir.mkdir(parents=True, exist_ok=True)
+                file_path = upload_dir / f"temp_{filename}"
+                file.save(str(file_path))
+        
+        # Handle file path
+        if not file_path and request.form.get('file_path'):
+            file_path = request.form.get('file_path')
+        
+        if not file_path or not os.path.exists(file_path):
+            return jsonify({'success': False, 'error': 'File not found'}), 400
+        
+        # Get sheets
+        sheets = parser.get_excel_sheets(str(file_path))
+        
+        # Detect sheet with ##variable## headers
+        detected_sheet = parser.detect_data_sheet(str(file_path))
+        
+        # Clean up temp file if uploaded
+        if 'file' in request.files and file_path and os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except:
+                pass
+        
+        return jsonify({
+            'success': True,
+            'sheets': sheets,
+            'detected_sheet': detected_sheet
+        })
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @api_bp.route('/jobs', methods=['POST'])
 def create_job():
     """Create a new job."""
@@ -167,6 +217,10 @@ def create_job():
         # Get tabname variable if provided
         tabname_variable = request.form.get('tabname_variable', '##tabname##').strip()
         
+        # Get sheet names if provided (for Excel files with multiple sheets)
+        data_sheet = request.form.get('data_sheet', '').strip() or None
+        template_sheet = request.form.get('template_sheet', '').strip() or None
+        
         # Get output directory if provided
         output_directory = request.form.get('output_directory', '').strip()
         if output_directory and not os.path.exists(output_directory):
@@ -183,7 +237,9 @@ def create_job():
             excel_print_settings=excel_print_settings,
             output_directory=output_directory if output_directory else None,
             filename_variable=filename_variable,
-            tabname_variable=tabname_variable
+            tabname_variable=tabname_variable,
+            data_sheet=data_sheet,
+            template_sheet=template_sheet
         )
         
         # Start processing in background thread
@@ -345,6 +401,8 @@ def rerun_job(job_id):
         # Create new job with same settings
         filename_variable = original_job.metadata.get('filename_variable', '##filename##')
         tabname_variable = original_job.metadata.get('tabname_variable', '##tabname##')
+        data_sheet = original_job.metadata.get('data_sheet', None)
+        template_sheet = original_job.metadata.get('template_sheet', None)
         
         new_job = manager.create_job(
             template_path=original_job.template_path,
@@ -353,7 +411,9 @@ def rerun_job(job_id):
             excel_print_settings=original_job.excel_print_settings,
             output_directory=original_job.output_directory,
             filename_variable=filename_variable,
-            tabname_variable=tabname_variable
+            tabname_variable=tabname_variable,
+            data_sheet=data_sheet,
+            template_sheet=template_sheet
         )
         
         # Start processing

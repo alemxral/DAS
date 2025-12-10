@@ -267,6 +267,17 @@ async function handleCreateJob(e) {
         formData.append('tabname_variable', tabnameVariable);
     }
     
+    // Add sheet names if specified
+    const dataSheet = document.getElementById('data_sheet')?.value.trim();
+    if (dataSheet) {
+        formData.append('data_sheet', dataSheet);
+    }
+    
+    const templateSheet = document.getElementById('template_sheet')?.value.trim();
+    if (templateSheet) {
+        formData.append('template_sheet', templateSheet);
+    }
+    
     // Add Excel print settings if applicable
     const excelPrintSettings = getExcelPrintSettings();
     if (excelPrintSettings) {
@@ -490,6 +501,25 @@ async function editJob(jobId) {
             
             // Toggle tabname variable visibility based on output formats
             toggleTabnameVariable();
+            
+            // Load and populate sheet selections if Excel files
+            if (job.template_path && (job.template_path.toLowerCase().endsWith('.xlsx') || job.template_path.toLowerCase().endsWith('.xls'))) {
+                loadTemplateSheets();
+                if (job.metadata && job.metadata.template_sheet) {
+                    setTimeout(() => {
+                        document.getElementById('template_sheet').value = job.metadata.template_sheet;
+                    }, 500);
+                }
+            }
+            
+            if (job.data_path && (job.data_path.toLowerCase().endsWith('.xlsx') || job.data_path.toLowerCase().endsWith('.xls'))) {
+                loadDataSheets();
+                if (job.metadata && job.metadata.data_sheet) {
+                    setTimeout(() => {
+                        document.getElementById('data_sheet').value = job.metadata.data_sheet;
+                    }, 500);
+                }
+            }
             
             // Populate output directory
             if (job.output_directory) {
@@ -795,11 +825,197 @@ async function browseDataPath() {
         
         if (result.success && result.path) {
             document.getElementById('data_path').value = result.path;
+            loadDataSheets();
         } else if (result.error) {
             showError(result.error);
         }
     } catch (error) {
         showError('Failed to open file browser: ' + error.message);
+    }
+}
+
+// Handle template file change
+function handleTemplateFileChange(input) {
+    if (input.files && input.files[0]) {
+        const file = input.files[0];
+        if (file.name.toLowerCase().endsWith('.xlsx') || file.name.toLowerCase().endsWith('.xls')) {
+            loadTemplateSheetsFromFile(file);
+        } else {
+            document.getElementById('template-sheet-selection').style.display = 'none';
+        }
+    }
+    toggleExcelPrintSettings();
+}
+
+// Handle data file change
+function handleDataFileChange(input) {
+    if (input.files && input.files[0]) {
+        loadDataSheetsFromFile(input.files[0]);
+    }
+}
+
+// Load template sheets from path
+async function loadTemplateSheets() {
+    const pathInput = document.getElementById('template_path');
+    if (!pathInput || !pathInput.value) return;
+    
+    const path = pathInput.value.trim();
+    if (!path.toLowerCase().endsWith('.xlsx') && !path.toLowerCase().endsWith('.xls')) {
+        document.getElementById('template-sheet-selection').style.display = 'none';
+        return;
+    }
+    
+    try {
+        const formData = new FormData();
+        formData.append('file_path', path);
+        
+        const response = await fetch(`${API_BASE}/excel/sheets`, {
+            method: 'POST',
+            body: formData
+        });
+        
+        const result = await response.json();
+        
+        if (result.success && result.sheets) {
+            populateTemplateSheets(result.sheets);
+        }
+    } catch (error) {
+        console.error('Error loading template sheets:', error);
+    }
+}
+
+// Load template sheets from uploaded file
+async function loadTemplateSheetsFromFile(file) {
+    try {
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        const response = await fetch(`${API_BASE}/excel/sheets`, {
+            method: 'POST',
+            body: formData
+        });
+        
+        const result = await response.json();
+        
+        if (result.success && result.sheets) {
+            populateTemplateSheets(result.sheets);
+        }
+    } catch (error) {
+        console.error('Error loading template sheets:', error);
+    }
+}
+
+// Populate template sheet dropdown
+function populateTemplateSheets(sheets) {
+    const select = document.getElementById('template_sheet');
+    const container = document.getElementById('template-sheet-selection');
+    
+    if (!select || !container) return;
+    
+    // Clear existing options except first
+    select.innerHTML = '<option value="">-- All Sheets / Auto-detect --</option>';
+    
+    if (sheets && sheets.length > 1) {
+        sheets.forEach(sheet => {
+            const option = document.createElement('option');
+            option.value = sheet;
+            option.textContent = sheet;
+            select.appendChild(option);
+        });
+        container.style.display = 'block';
+    } else {
+        container.style.display = 'none';
+    }
+}
+
+// Load data sheets from path
+async function loadDataSheets() {
+    const pathInput = document.getElementById('data_path');
+    if (!pathInput || !pathInput.value) return;
+    
+    const path = pathInput.value.trim();
+    if (!path.toLowerCase().endsWith('.xlsx') && !path.toLowerCase().endsWith('.xls')) {
+        document.getElementById('data-sheet-selection').style.display = 'none';
+        return;
+    }
+    
+    try {
+        const formData = new FormData();
+        formData.append('file_path', path);
+        
+        const response = await fetch(`${API_BASE}/excel/sheets`, {
+            method: 'POST',
+            body: formData
+        });
+        
+        const result = await response.json();
+        
+        if (result.success && result.sheets) {
+            populateDataSheets(result.sheets, result.detected_sheet);
+        }
+    } catch (error) {
+        console.error('Error loading data sheets:', error);
+    }
+}
+
+// Load data sheets from uploaded file
+async function loadDataSheetsFromFile(file) {
+    try {
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        const response = await fetch(`${API_BASE}/excel/sheets`, {
+            method: 'POST',
+            body: formData
+        });
+        
+        const result = await response.json();
+        
+        if (result.success && result.sheets) {
+            populateDataSheets(result.sheets, result.detected_sheet);
+        }
+    } catch (error) {
+        console.error('Error loading data sheets:', error);
+    }
+}
+
+// Populate data sheet dropdown
+function populateDataSheets(sheets, detectedSheet) {
+    const select = document.getElementById('data_sheet');
+    const container = document.getElementById('data-sheet-selection');
+    const info = document.getElementById('detected-sheet-info');
+    
+    if (!select || !container) return;
+    
+    // Clear existing options except first
+    select.innerHTML = '<option value="">-- Auto-detect --</option>';
+    
+    if (sheets && sheets.length > 0) {
+        sheets.forEach(sheet => {
+            const option = document.createElement('option');
+            option.value = sheet;
+            option.textContent = sheet;
+            if (sheet === detectedSheet) {
+                option.textContent += ' ✓';
+            }
+            select.appendChild(option);
+        });
+        
+        if (sheets.length > 1) {
+            container.style.display = 'block';
+            
+            if (detectedSheet && info) {
+                info.textContent = `Auto-detected: "${detectedSheet}" (contains ##variable## headers)`;
+                info.style.color = '#059669'; // green
+            } else if (info) {
+                info.textContent = 'No ##variable## headers detected. First sheet will be used.';
+                info.style.color = '#d97706'; // orange
+            }
+        } else {
+            container.style.display = 'none';
+        }
+    } else {
+        container.style.display = 'none';
     }
 }
 

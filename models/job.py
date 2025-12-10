@@ -26,19 +26,22 @@ class Job:
         template_path: Optional[str] = None,
         data_path: Optional[str] = None,
         output_formats: Optional[List[str]] = None,
-        job_id: Optional[str] = None
+        job_id: Optional[str] = None,
+        templates: Optional[List[Dict]] = None
     ):
         """
         Initialize a Job.
         
         Args:
-            template_path: Path to template file
+            template_path: Path to template file (legacy, for backward compatibility)
             data_path: Path to data file
             output_formats: List of desired output formats
             job_id: Optional job ID (generated if not provided)
+            templates: List of template dictionaries with path, priority, sheet info
         """
         self.id = job_id or str(uuid.uuid4())
-        self.template_path = template_path
+        self.template_path = template_path  # Keep for backward compatibility
+        self.templates = templates or []  # New: list of template configs
         self.data_path = data_path
         self.output_formats = output_formats or []
         self.status = JobStatus.PENDING
