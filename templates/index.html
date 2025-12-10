@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document Automation System</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        .job-card {
+            transition: all 0.3s ease;
+        }
+        .job-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+        }
+        .modal {
+            display: none;
+        }
+        .modal.active {
+            display: flex;
+        }
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #3b82f6;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+        .status-pending { background-color: #fef3c7; color: #92400e; }
+        .status-processing { background-color: #dbeafe; color: #1e40af; }
+        .status-completed { background-color: #d1fae5; color: #065f46; }
+        .status-failed { background-color: #fee2e2; color: #991b1b; }
+    </style>
+</head>
+<body class="bg-gray-50">
+    <!-- Header -->
+    <header class="bg-white shadow-sm">
+        <div class="max-w-7xl mx-auto px-4 py-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between items-center">
+                <div class="flex items-center space-x-3">
+                    <i class="fas fa-file-alt text-3xl text-blue-600"></i>
+                    <h1 class="text-2xl font-bold text-gray-900">Document Automation System</h1>
+                </div>
+                <button onclick="openCreateJobModal()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg flex items-center space-x-2 transition">
+                    <i class="fas fa-plus"></i>
+                    <span>New Job</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="max-w-7xl mx-auto px-4 py-8 sm:px-6 lg:px-8">
+        <!-- Dashboard Stats -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+            <div class="bg-white rounded-lg shadow p-6">
+                <div class="flex items-center">
+                    <div class="p-3 bg-blue-100 rounded-lg">
+                        <i class="fas fa-briefcase text-2xl text-blue-600"></i>
+                    </div>
+                    <div class="ml-4">
+                        <p class="text-sm text-gray-600">Total Jobs</p>
+                        <p id="stat-total" class="text-2xl font-bold text-gray-900">0</p>
+                    </div>
+                </div>
+            </div>
+            <div class="bg-white rounded-lg shadow p-6">
+                <div class="flex items-center">
+                    <div class="p-3 bg-yellow-100 rounded-lg">
+                        <i class="fas fa-clock text-2xl text-yellow-600"></i>
+                    </div>
+                    <div class="ml-4">
+                        <p class="text-sm text-gray-600">Processing</p>
+                        <p id="stat-processing" class="text-2xl font-bold text-gray-900">0</p>
+                    </div>
+                </div>
+            </div>
+            <div class="bg-white rounded-lg shadow p-6">
+                <div class="flex items-center">
+                    <div class="p-3 bg-green-100 rounded-lg">
+                        <i class="fas fa-check-circle text-2xl text-green-600"></i>
+                    </div>
+                    <div class="ml-4">
+                        <p class="text-sm text-gray-600">Completed</p>
+                        <p id="stat-completed" class="text-2xl font-bold text-gray-900">0</p>
+                    </div>
+                </div>
+            </div>
+            <div class="bg-white rounded-lg shadow p-6">
+                <div class="flex items-center">
+                    <div class="p-3 bg-red-100 rounded-lg">
+                        <i class="fas fa-exclamation-circle text-2xl text-red-600"></i>
+                    </div>
+                    <div class="ml-4">
+                        <p class="text-sm text-gray-600">Failed</p>
+                        <p id="stat-failed" class="text-2xl font-bold text-gray-900">0</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Jobs Grid -->
+        <div class="bg-white rounded-lg shadow">
+            <div class="px-6 py-4 border-b border-gray-200">
+                <h2 class="text-xl font-semibold text-gray-900">Jobs</h2>
+            </div>
+            <div id="jobs-container" class="p-6">
+                <div class="flex justify-center py-12">
+                    <div class="spinner"></div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Create Job Modal -->
+    <div id="createJobModal" class="modal fixed inset-0 bg-black bg-opacity-50 items-center justify-center z-50">
+        <div class="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+            <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+                <h3 class="text-xl font-semibold text-gray-900">Create New Job</h3>
+                <button onclick="closeCreateJobModal()" class="text-gray-400 hover:text-gray-600">
+                    <i class="fas fa-times text-xl"></i>
+                </button>
+            </div>
+            <form id="createJobForm" class="p-6 space-y-6">
+                <!-- Template Section -->
+                <div>
+                    <h4 class="text-lg font-medium text-gray-900 mb-3">Template</h4>
+                    <div class="space-y-3">
+                        <div>
+                            <label class="inline-flex items-center">
+                                <input type="radio" name="template_source" value="file" checked class="form-radio" onchange="toggleTemplateInput()">
+                                <span class="ml-2">Upload File</span>
+                            </label>
+                            <label class="inline-flex items-center ml-6">
+                                <input type="radio" name="template_source" value="path" class="form-radio" onchange="toggleTemplateInput()">
+                                <span class="ml-2">File Path</span>
+                            </label>
+                        </div>
+                        <div id="template-file-input">
+                            <input type="file" id="template_file" name="template_file" accept=".docx,.xlsx,.msg" class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100" onchange="handleTemplateFileChange(this)">
+                            <p class="mt-1 text-xs text-gray-500">Supported: .docx, .xlsx, .msg</p>
+                        </div>
+                        <div id="template-path-input" style="display:none;">
+                            <div class="flex space-x-2">
+                                <input type="text" id="template_path" name="template_path" placeholder="C:\path\to\template.docx" class="block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500">
+                                <button type="button" onclick="browseTemplatePath()" class="px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg whitespace-nowrap">
+                                    <i class="fas fa-folder-open mr-1"></i> Browse
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Data Section -->
+                <div>
+                    <h4 class="text-lg font-medium text-gray-900 mb-3">Data File</h4>
+                    <div class="space-y-3">
+                        <div>
+                            <label class="inline-flex items-center">
+                                <input type="radio" name="data_source" value="file" checked class="form-radio" onchange="toggleDataInput()">
+                                <span class="ml-2">Upload File</span>
+                            </label>
+                            <label class="inline-flex items-center ml-6">
+                                <input type="radio" name="data_source" value="path" class="form-radio" onchange="toggleDataInput()">
+                                <span class="ml-2">File Path</span>
+                            </label>
+                        </div>
+                        <div id="data-file-input">
+                            <input type="file" id="data_file" name="data_file" accept=".xlsx,.xls" class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100">
+                            <p class="mt-1 text-xs text-gray-500">Supported: .xlsx, .xls (First row should contain ##variable##)</p>
+                        </div>
+                        <div id="data-path-input" style="display:none;">
+                            <div class="flex space-x-2">
+                                <input type="text" id="data_path" name="data_path" placeholder="C:\path\to\data.xlsx" class="block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500">
+                                <button type="button" onclick="browseDataPath()" class="px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg whitespace-nowrap">
+                                    <i class="fas fa-folder-open mr-1"></i> Browse
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Output Formats -->
+                <div>
+                    <h4 class="text-lg font-medium text-gray-900 mb-3">Output Formats</h4>
+                    <div class="grid grid-cols-2 gap-3">
+                        <label class="flex items-center p-3 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50">
+                            <input type="checkbox" name="output_formats" value="pdf" checked class="form-checkbox h-5 w-5 text-blue-600" onchange="toggleExcelPrintSettings()">
+                            <span class="ml-2">PDF</span>
+                        </label>
+                        <label class="flex items-center p-3 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50">
+                            <input type="checkbox" name="output_formats" value="word" class="form-checkbox h-5 w-5 text-blue-600">
+                            <span class="ml-2">Word</span>
+                        </label>
+                        <label class="flex items-center p-3 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50">
+                            <input type="checkbox" name="output_formats" value="excel" class="form-checkbox h-5 w-5 text-blue-600">
+                            <span class="ml-2">Excel (Single Sheet)</span>
+                        </label>
+                        <label class="flex items-center p-3 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50">
+                            <input type="checkbox" name="output_formats" value="excel_workbook" class="form-checkbox h-5 w-5 text-blue-600">
+                            <span class="ml-2">Excel (Workbook)</span>
+                        </label>
+                        <label class="flex items-center p-3 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50">
+                            <input type="checkbox" name="output_formats" value="msg" class="form-checkbox h-5 w-5 text-blue-600">
+                            <span class="ml-2">MSG</span>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Output Directory (Optional) -->
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">
+                        Output Directory (Optional)
+                        <span class="text-gray-500 text-xs ml-1">Files will be automatically saved here</span>
+                    </label>
+                    <div class="flex space-x-2">
+                        <input type="text" id="output_directory" name="output_directory" placeholder="C:\path\to\output (leave empty to download)" class="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500">
+                        <button type="button" onclick="browseOutputDirectory()" class="px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg">
+                            <i class="fas fa-folder-open"></i> Browse
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Excel Print Settings (shown when Excel template + PDF output) -->
+                <div id="excel-print-settings" style="display:none;">
+                    <h4 class="text-lg font-medium text-gray-900 mb-3">Excel to PDF Print Settings</h4>
+                    
+                    <div class="space-y-4 p-4 bg-gray-50 rounded-lg">
+                        <!-- Page Range -->
+                        <div class="grid grid-cols-3 gap-3">
+                            <div class="col-span-3">
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Page Range</label>
+                            </div>
+                            <div>
+                                <label class="text-xs text-gray-600">From Page</label>
+                                <input type="number" id="page_from" min="1" value="1" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
+                            </div>
+                            <div>
+                                <label class="text-xs text-gray-600">To Page (0=All)</label>
+                                <input type="number" id="page_to" min="0" value="0" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
+                            </div>
+                        </div>
+
+                        <!-- Orientation -->
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Orientation</label>
+                            <div class="flex space-x-4">
+                                <label class="flex items-center">
+                                    <input type="radio" name="orientation" value="portrait" checked class="form-radio">
+                                    <span class="ml-2 text-sm">Portrait</span>
+                                </label>
+                                <label class="flex items-center">
+                                    <input type="radio" name="orientation" value="landscape" class="form-radio">
+                                    <span class="ml-2 text-sm">Landscape</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- Paper Size -->
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Paper Size</label>
+                            <select id="paper_size" class="block w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
+                                <option value="a4">A4</option>
+                                <option value="letter">Letter</option>
+                                <option value="a3">A3</option>
+                                <option value="legal">Legal</option>
+                                <option value="tabloid">Tabloid</option>
+                                <option value="a5">A5</option>
+                            </select>
+                        </div>
+
+                        <!-- Margins -->
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Margins (inches)</label>
+                            <div class="grid grid-cols-4 gap-2">
+                                <div>
+                                    <label class="text-xs text-gray-600">Left</label>
+                                    <input type="number" id="margin_left" step="0.1" value="0.75" class="mt-1 block w-full px-2 py-1 border border-gray-300 rounded text-sm">
+                                </div>
+                                <div>
+                                    <label class="text-xs text-gray-600">Right</label>
+                                    <input type="number" id="margin_right" step="0.1" value="0.75" class="mt-1 block w-full px-2 py-1 border border-gray-300 rounded text-sm">
+                                </div>
+                                <div>
+                                    <label class="text-xs text-gray-600">Top</label>
+                                    <input type="number" id="margin_top" step="0.1" value="1.0" class="mt-1 block w-full px-2 py-1 border border-gray-300 rounded text-sm">
+                                </div>
+                                <div>
+                                    <label class="text-xs text-gray-600">Bottom</label>
+                                    <input type="number" id="margin_bottom" step="0.1" value="1.0" class="mt-1 block w-full px-2 py-1 border border-gray-300 rounded text-sm">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Scaling -->
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Scaling</label>
+                            <div class="space-y-2">
+                                <label class="flex items-center">
+                                    <input type="radio" name="scaling_type" value="percent" checked class="form-radio" onchange="toggleScalingInputs()">
+                                    <span class="ml-2 text-sm">Scale to:</span>
+                                    <input type="number" id="scale_percent" min="10" max="400" value="100" class="ml-2 w-20 px-2 py-1 border border-gray-300 rounded text-sm">
+                                    <span class="ml-1 text-sm">%</span>
+                                </label>
+                                <label class="flex items-center">
+                                    <input type="radio" name="scaling_type" value="fit_to" class="form-radio" onchange="toggleScalingInputs()">
+                                    <span class="ml-2 text-sm">Fit to:</span>
+                                    <input type="number" id="fit_width" min="1" value="1" class="ml-2 w-16 px-2 py-1 border border-gray-300 rounded text-sm" disabled>
+                                    <span class="ml-1 text-sm">page(s) wide by</span>
+                                    <input type="number" id="fit_height" min="1" value="1" class="ml-2 w-16 px-2 py-1 border border-gray-300 rounded text-sm" disabled>
+                                    <span class="ml-1 text-sm">tall</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- Additional Options -->
+                        <div class="space-y-2">
+                            <label class="flex items-center">
+                                <input type="checkbox" id="center_horizontally" class="form-checkbox h-4 w-4 text-blue-600">
+                                <span class="ml-2 text-sm">Center Horizontally</span>
+                            </label>
+                            <label class="flex items-center">
+                                <input type="checkbox" id="center_vertically" class="form-checkbox h-4 w-4 text-blue-600">
+                                <span class="ml-2 text-sm">Center Vertically</span>
+                            </label>
+                            <label class="flex items-center">
+                                <input type="checkbox" id="ignore_print_areas" class="form-checkbox h-4 w-4 text-blue-600">
+                                <span class="ml-2 text-sm">Ignore Print Areas</span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Actions -->
+                <div class="flex justify-end space-x-3 pt-4 border-t">
+                    <button type="button" onclick="closeCreateJobModal()" class="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">
+                        Cancel
+                    </button>
+                    <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                        Create Job
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Preview Modal -->
+    <div id="previewModal" class="modal fixed inset-0 bg-black bg-opacity-50 items-center justify-center z-50">
+        <div class="bg-white rounded-lg shadow-xl max-w-5xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+            <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+                <h3 class="text-xl font-semibold text-gray-900">File Preview</h3>
+                <button onclick="closePreviewModal()" class="text-gray-400 hover:text-gray-600">
+                    <i class="fas fa-times text-xl"></i>
+                </button>
+            </div>
+            <div id="preview-content" class="p-6">
+                <!-- Preview content will be loaded here -->
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
