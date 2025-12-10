@@ -73,7 +73,7 @@ class JobManager:
     
     def create_job(
         self,
-        template_path: str,
+        template_path: Optional[str],
         data_path: str,
         output_formats: List[str],
         excel_print_settings: Optional[Dict] = None,
@@ -81,7 +81,8 @@ class JobManager:
         filename_variable: str = '##filename##',
         tabname_variable: str = '##tabname##',
         data_sheet: Optional[str] = None,
-        template_sheet: Optional[str] = None
+        template_sheet: Optional[str] = None,
+        templates: Optional[List[Dict]] = None
     ) -> Job:
         """
         Create a new job.
@@ -130,24 +131,59 @@ class JobManager:
         
         # Track and copy files
         try:
-            # Track template file
-            template_info = self.file_tracker.track_file(template_path)
-            job.template_file_id = template_info['file_id']
-            job.local_template_path = template_info['local_path']
+            # Handle multi-template mode
+            if templates and len(templates) > 0:
+                # Process multiple templates
+                processed_templates = []
+                for idx, tmpl in enumerate(templates):
+                    tmpl_path = tmpl.get('path')
+                    if not tmpl_path or not os.path.exists(tmpl_path):
+                        continue
+                    
+                    # Track template file
+                    template_info = self.file_tracker.track_file(tmpl_path)
+                    
+                    # Copy to job directory
+                    job_template_path = job_dir / f"template_{idx}{Path(tmpl_path).suffix}"
+                    shutil.copy2(template_info['local_path'], job_template_path)
+                    
+                    # Store template info
+                    processed_templates.append({
+                        'path': str(job_template_path),
+                        'original_path': tmpl_path,
+                        'priority': tmpl.get('priority', idx),
+                        'sheet': tmpl.get('sheet', None),
+                        'file_id': template_info['file_id'],
+                        'local_path': template_info['local_path']
+                    })
+                
+                # Sort by priority
+                processed_templates.sort(key=lambda x: x['priority'])
+                job.metadata['templates'] = processed_templates
+                
+                # Set first template as main for backward compatibility
+                if processed_templates:
+                    job.template_path = processed_templates[0]['original_path']
+                    job.metadata['job_template_path'] = processed_templates[0]['path']
+            else:
+                # Legacy single template mode
+                if template_path:
+                    template_info = self.file_tracker.track_file(template_path)
+                    job.template_file_id = template_info['file_id']
+                    job.local_template_path = template_info['local_path']
+                    
+                    # Copy files to job directory for processing
+                    job_template_path = job_dir / f"template{Path(template_path).suffix}"
+                    shutil.copy2(job.local_template_path, job_template_path)
+                    job.metadata['job_template_path'] = str(job_template_path)
             
             # Track data file
             data_info = self.file_tracker.track_file(data_path)
             job.data_file_id = data_info['file_id']
             job.local_data_path = data_info['local_path']
             
-            # Copy files to job directory for processing
-            job_template_path = job_dir / f"template{Path(template_path).suffix}"
             job_data_path = job_dir / f"data{Path(data_path).suffix}"
-            
-            shutil.copy2(job.local_template_path, job_template_path)
             shutil.copy2(job.local_data_path, job_data_path)
-            
-            job.metadata['job_template_path'] = str(job_template_path)
             job.metadata['job_data_path'] = str(job_data_path)
             
         except Exception as e:
@@ -251,26 +287,61 @@ class JobManager:
                     else:
                         base_filename = f"processed_{idx}"
                     
-                    # Generate document from template
-                    template_ext = Path(job.metadata['job_template_path']).suffix
-                    processed_doc = output_dir / f"{base_filename}{template_ext}"
-                    print(f"Processing row {idx}: Generating {base_filename}{template_ext}...")
+                    # Check if using multi-template mode
+                    templates_list = job.metadata.get('templates', [])
+                    processed_docs = []
                     
-                    # Get template sheet if specified
-                    template_sheet = job.metadata.get('template_sheet', None)
-                    
-                    self.template_processor.process_template(
-                        job.metadata['job_template_path'],
-                        row_data,
-                        str(processed_doc),
-                        sheet_name=template_sheet
-                    )
-                    
-                    # Verify processed document was created
-                    if not processed_doc.exists():
-                        raise RuntimeError(f"Failed to create processed document: {processed_doc}")
-                    
-                    print(f"Row {idx}: Template processed successfully")
+                    if templates_list and len(templates_list) > 0:
+                        # Multi-template mode: process all templates for this row
+                        print(f"Processing row {idx} with {len(templates_list)} templates...")
+                        
+                        for tmpl_idx, template_config in enumerate(templates_list):
+                            template_path = template_config['path']
+                            template_sheet = template_config.get('sheet', None)
+                            template_ext = Path(template_path).suffix
+                            
+                            # Create output with template index to keep them separate
+                            processed_doc = output_dir / f"{base_filename}_tmpl{tmpl_idx}{template_ext}"
+                            
+                            print(f"Row {idx}, Template {tmpl_idx+1}/{len(templates_list)}: Processing {Path(template_path).name}...")
+                            
+                            self.template_processor.process_template(
+                                template_path,
+                                row_data,
+                                str(processed_doc),
+                                sheet_name=template_sheet
+                            )
+                            
+                            if not processed_doc.exists():
+                                raise RuntimeError(f"Failed to create document from template {tmpl_idx}: {processed_doc}")
+                            
+                            processed_docs.append({
+                                'path': processed_doc,
+                                'priority': template_config['priority'],
+                                'template_idx': tmpl_idx
+                            })
+                        
+                        print(f"Row {idx}: All templates processed successfully")
+                    else:
+                        # Legacy single template mode
+                        template_ext = Path(job.metadata['job_template_path']).suffix
+                        processed_doc = output_dir / f"{base_filename}{template_ext}"
+                        print(f"Processing row {idx}: Generating {base_filename}{template_ext}...")
+                        
+                        template_sheet = job.metadata.get('template_sheet', None)
+                        
+                        self.template_processor.process_template(
+                            job.metadata['job_template_path'],
+                            row_data,
+                            str(processed_doc),
+                            sheet_name=template_sheet
+                        )
+                        
+                        if not processed_doc.exists():
+                            raise RuntimeError(f"Failed to create processed document: {processed_doc}")
+                        
+                        processed_docs.append({'path': processed_doc, 'priority': 0, 'template_idx': 0})
+                        print(f"Row {idx}: Template processed successfully")
                     
                     # Convert to requested formats
                     for output_format in job.output_formats:
@@ -281,34 +352,100 @@ class JobManager:
                         format_dir = output_dir / output_format
                         format_dir.mkdir(parents=True, exist_ok=True)
                         
-                        print(f"Row {idx}: Converting to {output_format}...")
-                        
-                        # Pass Excel print settings if converting to PDF from Excel
-                        print_settings = None
-                        if output_format == 'pdf' and job.excel_print_settings:
-                            template_ext = Path(job.metadata['job_template_path']).suffix.lower()
-                            if template_ext in ['.xlsx', '.xls']:
-                                print_settings = job.excel_print_settings
-                                print(f"Row {idx}: Using Excel print settings for PDF conversion")
-                        
-                        try:
-                            output_file = self.format_converter.convert(
-                                str(processed_doc),
-                                output_format,
-                                str(format_dir),
-                                print_settings
-                            )
+                        # Multi-template mode: convert and merge all templates
+                        if len(processed_docs) > 1:
+                            print(f"Row {idx}: Converting {len(processed_docs)} templates to {output_format}...")
                             
-                            # Verify output file was created
-                            if not os.path.exists(output_file):
-                                raise RuntimeError(f"Output file was not created: {output_file}")
+                            temp_files = []
+                            for doc_info in processed_docs:
+                                doc_path = doc_info['path']
+                                
+                                # Determine print settings
+                                print_settings = None
+                                if output_format == 'pdf' and job.excel_print_settings:
+                                    doc_ext = Path(doc_path).suffix.lower()
+                                    if doc_ext in ['.xlsx', '.xls']:
+                                        print_settings = job.excel_print_settings
+                                
+                                try:
+                                    temp_output = self.format_converter.convert(
+                                        str(doc_path),
+                                        output_format,
+                                        str(format_dir),
+                                        print_settings
+                                    )
+                                    
+                                    if not os.path.exists(temp_output):
+                                        raise RuntimeError(f"Output file was not created: {temp_output}")
+                                    
+                                    temp_files.append({
+                                        'path': temp_output,
+                                        'priority': doc_info['priority']
+                                    })
+                                except Exception as e:
+                                    print(f"Row {idx}: Error converting template {doc_info['template_idx']}: {str(e)}")
                             
-                            print(f"Row {idx}: Successfully created {output_format} file: {output_file}")
-                            job.add_output_file(output_file)
+                            # Merge files if PDF format
+                            if output_format == 'pdf' and len(temp_files) > 1:
+                                merged_file = format_dir / f"{base_filename}.pdf"
+                                self._merge_template_pdfs(temp_files, merged_file, job)
+                                job.add_output_file(str(merged_file))
+                                
+                                # Remove temp files
+                                for tf in temp_files:
+                                    try:
+                                        os.remove(tf['path'])
+                                    except:
+                                        pass
+                                        
+                                print(f"Row {idx}: Merged {len(temp_files)} PDFs into {merged_file.name}")
+                            elif output_format == 'excel' and len(temp_files) > 1:
+                                # Merge Excel files
+                                merged_file = format_dir / f"{base_filename}.xlsx"
+                                self._merge_template_excels(temp_files, merged_file, job)
+                                job.add_output_file(str(merged_file))
+                                
+                                # Remove temp files
+                                for tf in temp_files:
+                                    try:
+                                        os.remove(tf['path'])
+                                    except:
+                                        pass
+                                        
+                                print(f"Row {idx}: Merged {len(temp_files)} Excel files into {merged_file.name}")
+                            else:
+                                # For other formats or single file, just add to outputs
+                                for tf in temp_files:
+                                    job.add_output_file(tf['path'])
+                        else:
+                            # Single template mode (legacy)
+                            processed_doc = processed_docs[0]['path']
+                            print(f"Row {idx}: Converting to {output_format}...")
                             
-                        except Exception as conv_error:
-                            print(f"Row {idx}: Error converting to {output_format}: {str(conv_error)}")
-                            raise
+                            print_settings = None
+                            if output_format == 'pdf' and job.excel_print_settings:
+                                template_ext = Path(job.metadata.get('job_template_path', '')).suffix.lower()
+                                if template_ext in ['.xlsx', '.xls']:
+                                    print_settings = job.excel_print_settings
+                                    print(f"Row {idx}: Using Excel print settings for PDF conversion")
+                            
+                            try:
+                                output_file = self.format_converter.convert(
+                                    str(processed_doc),
+                                    output_format,
+                                    str(format_dir),
+                                    print_settings
+                                )
+                                
+                                if not os.path.exists(output_file):
+                                    raise RuntimeError(f"Output file was not created: {output_file}")
+                                
+                                print(f"Row {idx}: Successfully created {output_format} file: {output_file}")
+                                job.add_output_file(output_file)
+                                
+                            except Exception as conv_error:
+                                print(f"Row {idx}: Error converting to {output_format}: {str(conv_error)}")
+                                raise
                     
                     job.increment_processed()
                     print(f"Row {idx}: Completed successfully")
@@ -601,6 +738,104 @@ class JobManager:
             import traceback
             traceback.print_exc()
             # Don't fail the entire job if merge fails
+    
+    def _merge_template_pdfs(self, pdf_list: List[Dict], output_path: Path, job: Job):
+        """
+        Merge PDFs from multiple templates in priority order.
+        
+        Args:
+            pdf_list: List of dicts with 'path' and 'priority' keys
+            output_path: Path for merged output file
+            job: Job instance
+        """
+        from PyPDF2 import PdfMerger
+        
+        # Sort by priority
+        sorted_pdfs = sorted(pdf_list, key=lambda x: x['priority'])
+        
+        try:
+            merger = PdfMerger()
+            
+            for pdf_info in sorted_pdfs:
+                pdf_path = pdf_info['path']
+                if os.path.exists(pdf_path):
+                    merger.append(str(pdf_path))
+            
+            merger.write(str(output_path))
+            merger.close()
+            
+            print(f"Job {job.id}: Merged {len(sorted_pdfs)} template PDFs into {output_path.name}")
+            
+        except Exception as e:
+            print(f"Job {job.id}: Error merging template PDFs: {str(e)}")
+            import traceback
+            traceback.print_exc()
+    
+    def _merge_template_excels(self, excel_list: List[Dict], output_path: Path, job: Job):
+        """
+        Merge Excel files from multiple templates as separate sheets.
+        
+        Args:
+            excel_list: List of dicts with 'path' and 'priority' keys
+            output_path: Path for merged output file
+            job: Job instance
+        """
+        from openpyxl import Workbook, load_workbook
+        
+        # Sort by priority
+        sorted_excels = sorted(excel_list, key=lambda x: x['priority'])
+        
+        try:
+            wb = Workbook()
+            wb.remove(wb.active)  # Remove default sheet
+            
+            for idx, excel_info in enumerate(sorted_excels):
+                excel_path = excel_info['path']
+                if not os.path.exists(excel_path):
+                    continue
+                
+                source_wb = load_workbook(excel_path)
+                source_sheet = source_wb.active
+                
+                # Create new sheet with template number
+                target_sheet = wb.create_sheet(title=f"Template_{idx+1}")
+                
+                # Copy cells
+                for row in source_sheet.iter_rows():
+                    for cell in row:
+                        target_cell = target_sheet.cell(
+                            row=cell.row,
+                            column=cell.column,
+                            value=cell.value
+                        )
+                        
+                        if cell.has_style:
+                            target_cell.font = cell.font.copy()
+                            target_cell.border = cell.border.copy()
+                            target_cell.fill = cell.fill.copy()
+                            target_cell.number_format = cell.number_format
+                            target_cell.protection = cell.protection.copy()
+                            target_cell.alignment = cell.alignment.copy()
+                
+                # Copy column dimensions
+                for col in source_sheet.column_dimensions:
+                    target_sheet.column_dimensions[col].width = source_sheet.column_dimensions[col].width
+                
+                # Copy row dimensions
+                for row in source_sheet.row_dimensions:
+                    target_sheet.row_dimensions[row].height = source_sheet.row_dimensions[row].height
+                
+                source_wb.close()
+            
+            wb.save(str(output_path))
+            wb.close()
+            
+            print(f"Job {job.id}: Merged {len(sorted_excels)} template Excel files into {output_path.name}")
+            
+        except Exception as e:
+            print(f"Job {job.id}: Error merging template Excel files: {str(e)}")
+            import traceback
+            traceback.print_exc()
     
     def _merge_excel_workbook(self, output_dir: Path, job: Job):
         """

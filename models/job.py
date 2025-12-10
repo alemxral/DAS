@@ -84,9 +84,13 @@ class Job:
         actual_template_path = self.metadata.get('job_template_path', self.template_path)
         actual_data_path = self.metadata.get('job_data_path', self.data_path)
         
+        # Get templates from metadata if using multi-template mode
+        templates_list = self.metadata.get('templates', self.templates if self.templates else [])
+        
         return {
             'id': self.id,
-            'template_path': actual_template_path,
+            'template_path': actual_template_path,  # Legacy support
+            'templates': templates_list,  # New multi-template support
             'data_path': actual_data_path,
             'output_formats': self.output_formats,
             'status': self.status.value,

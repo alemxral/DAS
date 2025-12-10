@@ -87,6 +87,38 @@ class DocumentParser:
         except:
             return None
     
+    def detect_template_sheet(self, file_path: str) -> str:
+        """
+        Auto-detect the sheet containing ##placeholder## for templates.
+        
+        Args:
+            file_path: Path to Excel template file
+            
+        Returns:
+            Sheet name with ##placeholder##, or None if not found
+        """
+        if not Path(file_path).exists():
+            return None
+        
+        try:
+            import openpyxl
+            wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
+            
+            # Check each sheet for ##variable## pattern anywhere
+            for sheet_name in wb.sheetnames:
+                ws = wb[sheet_name]
+                # Check all cells in the sheet (limit to first 100 rows for performance)
+                for row in ws.iter_rows(max_row=100, values_only=True):
+                    for cell_value in row:
+                        if cell_value and isinstance(cell_value, str) and '##' in cell_value:
+                            wb.close()
+                            return sheet_name
+            
+            wb.close()
+            return None
+        except:
+            return None
+    
     def parse_excel_data(self, file_path: str, sheet_name: str = None) -> Dict:
         """
         Parse Excel file to extract variables and data.

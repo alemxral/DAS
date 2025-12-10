@@ -3,6 +3,7 @@ API Routes
 Handles all API endpoints for the document automation system.
 """
 import os
+import json
 from flask import Blueprint, request, jsonify, send_file, current_app
 from werkzeug.utils import secure_filename
 from pathlib import Path
@@ -92,6 +93,33 @@ def get_job(job_id):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@api_bp.route('/upload-temp-file', methods=['POST'])
+def upload_temp_file():
+    """Upload a temporary file and return its path."""
+    try:
+        if 'template_file' not in request.files:
+            return jsonify({'success': False, 'error': 'No file provided'}), 400
+        
+        file = request.files['template_file']
+        if not file or not file.filename:
+            return jsonify({'success': False, 'error': 'No file selected'}), 400
+        
+        from werkzeug.utils import secure_filename
+        filename = secure_filename(file.filename)
+        upload_dir = Path(current_app.config['UPLOAD_DIR'])
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        file_path = upload_dir / filename
+        file.save(str(file_path))
+        
+        return jsonify({
+            'success': True,
+            'path': str(file_path)
+        })
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @api_bp.route('/excel/sheets', methods=['POST'])
 def get_excel_sheets():
     """Get list of sheets from an Excel file."""
@@ -100,6 +128,7 @@ def get_excel_sheets():
         parser = DocumentParser()
         
         file_path = None
+        is_template = request.form.get('is_template', 'false').lower() == 'true'
         
         # Handle file upload
         if 'file' in request.files:
@@ -122,8 +151,11 @@ def get_excel_sheets():
         # Get sheets
         sheets = parser.get_excel_sheets(str(file_path))
         
-        # Detect sheet with ##variable## headers
-        detected_sheet = parser.detect_data_sheet(str(file_path))
+        # Detect sheet with ##variable## or ##placeholder##
+        if is_template:
+            detected_sheet = parser.detect_template_sheet(str(file_path))
+        else:
+            detected_sheet = parser.detect_data_sheet(str(file_path))
         
         # Clean up temp file if uploaded
         if 'file' in request.files and file_path and os.path.exists(file_path):
@@ -188,9 +220,28 @@ def create_job():
             if not os.path.exists(data_path):
                 return jsonify({'success': False, 'error': 'Data file not found'}), 400
         
+        # Check if using multi-template mode
+        templates_json = request.form.get('templates', None)
+        templates = None
+        if templates_json:
+            print(f"Received templates JSON: {templates_json}")
+            try:
+                templates = json.loads(templates_json)
+                print(f"Parsed templates: {templates}")
+            except Exception as e:
+                print(f"Error parsing templates JSON: {str(e)}")
+                return jsonify({'success': False, 'error': f'Invalid templates JSON: {str(e)}'}), 400
+        
         # Validate inputs
-        if not template_path or not data_path:
-            return jsonify({'success': False, 'error': 'Both template and data files are required'}), 400
+        # In multi-template mode, templates list is used instead of template_path
+        if templates:
+            if not templates or len(templates) == 0:
+                return jsonify({'success': False, 'error': 'At least one template is required'}), 400
+            if not data_path:
+                return jsonify({'success': False, 'error': 'Data file is required'}), 400
+        else:
+            if not template_path or not data_path:
+                return jsonify({'success': False, 'error': 'Both template and data files are required'}), 400
         
         # Get output formats
         output_formats = request.form.get('output_formats', 'pdf')
@@ -205,7 +256,6 @@ def create_job():
         # Get Excel print settings if provided
         excel_print_settings = None
         if request.form.get('excel_print_settings'):
-            import json
             try:
                 excel_print_settings = json.loads(request.form.get('excel_print_settings'))
             except:
@@ -231,7 +281,7 @@ def create_job():
         
         # Create job
         job = manager.create_job(
-            template_path=str(template_path),
+            template_path=str(template_path) if template_path else None,
             data_path=str(data_path),
             output_formats=output_formats,
             excel_print_settings=excel_print_settings,
@@ -239,7 +289,8 @@ def create_job():
             filename_variable=filename_variable,
             tabname_variable=tabname_variable,
             data_sheet=data_sheet,
-            template_sheet=template_sheet
+            template_sheet=template_sheet,
+            templates=templates
         )
         
         # Start processing in background thread
@@ -403,6 +454,18 @@ def rerun_job(job_id):
         tabname_variable = original_job.metadata.get('tabname_variable', '##tabname##')
         data_sheet = original_job.metadata.get('data_sheet', None)
         template_sheet = original_job.metadata.get('template_sheet', None)
+        templates = original_job.metadata.get('templates', None)
+        
+        # Extract original paths from templates if using multi-template mode
+        if templates:
+            templates_copy = []
+            for tmpl in templates:
+                templates_copy.append({
+                    'path': tmpl.get('original_path', tmpl.get('path')),
+                    'priority': tmpl.get('priority', 0),
+                    'sheet': tmpl.get('sheet', None)
+                })
+            templates = templates_copy
         
         new_job = manager.create_job(
             template_path=original_job.template_path,
@@ -413,7 +476,8 @@ def rerun_job(job_id):
             filename_variable=filename_variable,
             tabname_variable=tabname_variable,
             data_sheet=data_sheet,
-            template_sheet=template_sheet
+            template_sheet=template_sheet,
+            templates=templates
         )
         
         # Start processing

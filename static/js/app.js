@@ -2,6 +2,7 @@
 
 const API_BASE = '/api';
 let refreshInterval = null;
+let templatesData = [];  // Store templates for multi-template mode
 
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', function() {
@@ -203,24 +204,69 @@ async function handleCreateJob(e) {
     
     const formData = new FormData();
     
-    // Get template
-    const templateSource = document.querySelector('input[name="template_source"]:checked').value;
-    if (templateSource === 'file') {
-        const templateFile = document.getElementById('template_file').files[0];
-        if (!templateFile && !isEditing) {
-            showError('Please select a template file');
+    // Check if using multiple templates
+    const useMultipleTemplates = document.getElementById('use_multiple_templates').checked;
+    
+    if (useMultipleTemplates) {
+        // Handle multiple templates
+        if (templatesData.length === 0) {
+            showError('Please add at least one template');
             return;
         }
-        if (templateFile) {
-            formData.append('template_file', templateFile);
+        
+        // Upload all template files first
+        const uploadedTemplates = [];
+        for (const tmpl of templatesData) {
+            // Create temporary FormData for file upload
+            const tempFormData = new FormData();
+            tempFormData.append('template_file', tmpl.file);
+            
+            try {
+                const response = await fetch(`${API_BASE}/upload-temp-file`, {
+                    method: 'POST',
+                    body: tempFormData
+                });
+                
+                const result = await response.json();
+                if (result.success && result.path) {
+                    uploadedTemplates.push({
+                        path: result.path,
+                        priority: tmpl.priority,
+                        sheet: tmpl.sheet
+                    });
+                } else {
+                    showError(`Failed to upload template: ${tmpl.fileName}`);
+                    return;
+                }
+            } catch (error) {
+                showError(`Error uploading template: ${tmpl.fileName}`);
+                return;
+            }
         }
+        
+        // Add templates as JSON
+        console.log('Sending templates:', uploadedTemplates);
+        formData.append('templates', JSON.stringify(uploadedTemplates));
     } else {
-        const templatePath = document.getElementById('template_path').value;
-        if (!templatePath) {
-            showError('Please enter a template path');
-            return;
+        // Single template mode (legacy)
+        const templateSource = document.querySelector('input[name="template_source"]:checked').value;
+        if (templateSource === 'file') {
+            const templateFile = document.getElementById('template_file').files[0];
+            if (!templateFile && !isEditing) {
+                showError('Please select a template file');
+                return;
+            }
+            if (templateFile) {
+                formData.append('template_file', templateFile);
+            }
+        } else {
+            const templatePath = document.getElementById('template_path').value;
+            if (!templatePath) {
+                showError('Please enter a template path');
+                return;
+            }
+            formData.append('template_path', templatePath);
         }
-        formData.append('template_path', templatePath);
     }
     
     // Get data
@@ -470,11 +516,31 @@ async function editJob(jobId) {
             document.getElementById('createJobForm').dataset.editingJobId = jobId;
             document.querySelector('#createJobModal h3').textContent = 'Edit Job';
             
-            // Populate template
-            if (job.template_path) {
-                document.querySelector('input[name="template_source"][value="path"]').checked = true;
-                toggleTemplateInput();
-                document.getElementById('template_path').value = job.template_path;
+            // Check if job has multiple templates
+            if (job.templates && job.templates.length > 0) {
+                // Enable multiple templates mode
+                document.getElementById('use_multiple_templates').checked = true;
+                toggleMultipleTemplates();
+                
+                // Note: Can't easily repopulate file inputs for security reasons
+                // Show a message instead
+                const multiSection = document.getElementById('multiple-templates-section');
+                const notice = document.createElement('div');
+                notice.className = 'bg-yellow-50 border border-yellow-200 rounded p-3 mb-3';
+                notice.innerHTML = `
+                    <p class="text-sm text-yellow-800">
+                        <i class="fas fa-info-circle mr-2"></i>
+                        This job uses ${job.templates.length} templates. You'll need to re-add them to edit.
+                    </p>
+                `;
+                multiSection.insertBefore(notice, multiSection.firstChild);
+            } else {
+                // Populate single template
+                if (job.template_path) {
+                    document.querySelector('input[name="template_source"][value="path"]').checked = true;
+                    toggleTemplateInput();
+                    document.getElementById('template_path').value = job.template_path;
+                }
             }
             
             // Populate data
@@ -758,6 +824,16 @@ function closeCreateJobModal() {
     document.getElementById('createJobForm').reset();
     delete document.getElementById('createJobForm').dataset.editingJobId;
     document.querySelector('#createJobModal h3').textContent = 'Create New Job';
+    
+    // Reset multi-template state
+    templatesData = [];
+    renderTemplatesTable();
+    document.getElementById('use_multiple_templates').checked = false;
+    toggleMultipleTemplates();
+    
+    // Remove any notice messages from edit mode
+    const notices = document.querySelectorAll('#multiple-templates-section .bg-yellow-50');
+    notices.forEach(notice => notice.remove());
 }
 
 function openPreviewModal() {
@@ -1163,4 +1239,148 @@ function showError(message) {
 
 function showSuccess(message) {
     alert(message);
+}
+
+// Multi-Template Management
+function toggleMultipleTemplates() {
+    const isChecked = document.getElementById('use_multiple_templates').checked;
+    const singleSection = document.getElementById('single-template-section');
+    const multipleSection = document.getElementById('multiple-templates-section');
+    
+    if (isChecked) {
+        singleSection.style.display = 'none';
+        multipleSection.style.display = 'block';
+    } else {
+        singleSection.style.display = 'block';
+        multipleSection.style.display = 'none';
+        templatesData = [];
+        renderTemplatesTable();
+    }
+}
+
+async function addTemplate() {
+    const fileInput = document.getElementById('multi_template_file');
+    
+    if (!fileInput.files || fileInput.files.length === 0) {
+        showError('Please select a template file first');
+        return;
+    }
+    
+    const file = fileInput.files[0];
+    const fileName = file.name;
+    const fileExt = fileName.toLowerCase().substring(fileName.lastIndexOf('.'));
+    
+    if (!['.docx', '.xlsx', '.msg'].includes(fileExt)) {
+        showError('Invalid file format. Supported: .docx, .xlsx, .msg');
+        return;
+    }
+    
+    // Detect sheet for Excel files
+    let detectedSheet = null;
+    if (fileExt === '.xlsx' || fileExt === '.xls') {
+        try {
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('is_template', 'true');
+            
+            const response = await fetch(`${API_BASE}/excel/sheets`, {
+                method: 'POST',
+                body: formData
+            });
+            
+            const result = await response.json();
+            if (result.success && result.detected_sheet) {
+                detectedSheet = result.detected_sheet;
+            }
+        } catch (error) {
+            console.error('Error detecting sheet:', error);
+        }
+    }
+    
+    // Add to templates list
+    const priority = templatesData.length + 1;
+    templatesData.push({
+        file: file,
+        fileName: fileName,
+        sheet: detectedSheet,
+        priority: priority
+    });
+    
+    renderTemplatesTable();
+    fileInput.value = '';  // Clear file input
+}
+
+function renderTemplatesTable() {
+    const container = document.getElementById('templates-table-container');
+    const tbody = document.getElementById('templates-table-body');
+    
+    if (templatesData.length === 0) {
+        container.style.display = 'none';
+        return;
+    }
+    
+    container.style.display = 'block';
+    tbody.innerHTML = '';
+    
+    templatesData.forEach((template, index) => {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+            <td class="px-3 py-2">
+                <div class="flex items-center space-x-1">
+                    <button type="button" onclick="movePriority(${index}, -1)" class="text-gray-500 hover:text-gray-700" ${index === 0 ? 'disabled' : ''}>
+                        <i class="fas fa-arrow-up"></i>
+                    </button>
+                    <button type="button" onclick="movePriority(${index}, 1)" class="text-gray-500 hover:text-gray-700" ${index === templatesData.length - 1 ? 'disabled' : ''}>
+                        <i class="fas fa-arrow-down"></i>
+                    </button>
+                    <span class="ml-2 font-medium">${template.priority}</span>
+                </div>
+            </td>
+            <td class="px-3 py-2 text-sm">${template.fileName}</td>
+            <td class="px-3 py-2 text-sm">
+                ${template.sheet ? `
+                    <select onchange="updateTemplateSheet(${index}, this.value)" class="text-xs border rounded px-2 py-1">
+                        <option value="">Auto-detect</option>
+                        <option value="${template.sheet}" selected>${template.sheet} ✓</option>
+                    </select>
+                ` : '<span class="text-gray-400">N/A</span>'}
+            </td>
+            <td class="px-3 py-2">
+                <button type="button" onclick="removeTemplate(${index})" class="text-red-600 hover:text-red-800">
+                    <i class="fas fa-trash"></i>
+                </button>
+            </td>
+        `;
+        tbody.appendChild(row);
+    });
+}
+
+function movePriority(index, direction) {
+    const newIndex = index + direction;
+    if (newIndex < 0 || newIndex >= templatesData.length) return;
+    
+    // Swap elements
+    [templatesData[index], templatesData[newIndex]] = [templatesData[newIndex], templatesData[index]];
+    
+    // Update priorities
+    templatesData.forEach((tmpl, idx) => {
+        tmpl.priority = idx + 1;
+    });
+    
+    renderTemplatesTable();
+}
+
+function updateTemplateSheet(index, sheet) {
+    templatesData[index].sheet = sheet || null;
+}
+
+function removeTemplate(index) {
+    templatesData.splice(index, 1);
+    
+    // Update priorities
+    templatesData.forEach((tmpl, idx) => {
+        tmpl.priority = idx + 1;
+    });
+    
+    renderTemplatesTable();
 }

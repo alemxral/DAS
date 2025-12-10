@@ -140,38 +140,77 @@
             <form id="createJobForm" class="p-6 space-y-6">
                 <!-- Template Section -->
                 <div>
-                    <h4 class="text-lg font-medium text-gray-900 mb-3">Template</h4>
-                    <div class="space-y-3">
-                        <div>
-                            <label class="inline-flex items-center">
-                                <input type="radio" name="template_source" value="file" checked class="form-radio" onchange="toggleTemplateInput()">
-                                <span class="ml-2">Upload File</span>
-                            </label>
-                            <label class="inline-flex items-center ml-6">
-                                <input type="radio" name="template_source" value="path" class="form-radio" onchange="toggleTemplateInput()">
-                                <span class="ml-2">File Path</span>
-                            </label>
-                        </div>
-                        <div id="template-file-input">
-                            <input type="file" id="template_file" name="template_file" accept=".docx,.xlsx,.msg" class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100" onchange="handleTemplateFileChange(this)">
-                            <p class="mt-1 text-xs text-gray-500">Supported: .docx, .xlsx, .msg</p>
-                        </div>
-                        <div id="template-path-input" style="display:none;">
-                            <div class="flex space-x-2">
-                                <input type="text" id="template_path" name="template_path" placeholder="C:\path\to\template.docx" class="block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500" oninput="toggleExcelPrintSettings(); loadTemplateSheets();">
-                                <button type="button" onclick="browseTemplatePath()" class="px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg whitespace-nowrap">
-                                    <i class="fas fa-folder-open mr-1"></i> Browse
-                                </button>
+                    <div class="flex justify-between items-center mb-3">
+                        <h4 class="text-lg font-medium text-gray-900">Templates</h4>
+                        <label class="inline-flex items-center text-sm">
+                            <input type="checkbox" id="use_multiple_templates" class="form-checkbox h-4 w-4 text-blue-600" onchange="toggleMultipleTemplates()">
+                            <span class="ml-2">Use Multiple Templates</span>
+                        </label>
+                    </div>
+                    
+                    <!-- Single Template Mode (Legacy) -->
+                    <div id="single-template-section">
+                        <div class="space-y-3">
+                            <div>
+                                <label class="inline-flex items-center">
+                                    <input type="radio" name="template_source" value="file" checked class="form-radio" onchange="toggleTemplateInput()">
+                                    <span class="ml-2">Upload File</span>
+                                </label>
+                                <label class="inline-flex items-center ml-6">
+                                    <input type="radio" name="template_source" value="path" class="form-radio" onchange="toggleTemplateInput()">
+                                    <span class="ml-2">File Path</span>
+                                </label>
+                            </div>
+                            <div id="template-file-input">
+                                <input type="file" id="template_file" name="template_file" accept=".docx,.xlsx,.msg" class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100" onchange="handleTemplateFileChange(this)">
+                                <p class="mt-1 text-xs text-gray-500">Supported: .docx, .xlsx, .msg</p>
+                            </div>
+                            <div id="template-path-input" style="display:none;">
+                                <div class="flex space-x-2">
+                                    <input type="text" id="template_path" name="template_path" placeholder="C:\path\to\template.docx" class="block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500" oninput="toggleExcelPrintSettings(); loadTemplateSheets();">
+                                    <button type="button" onclick="browseTemplatePath()" class="px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg whitespace-nowrap">
+                                        <i class="fas fa-folder-open mr-1"></i> Browse
+                                    </button>
+                                </div>
+                            </div>
+                            <div id="template-sheet-selection" style="display:none;">
+                                <label class="block text-sm font-medium text-gray-700 mb-2">
+                                    Template Sheet (Optional)
+                                    <span class="text-gray-500 text-xs ml-1">Select sheet if template has multiple sheets</span>
+                                </label>
+                                <select id="template_sheet" name="template_sheet" class="block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500">
+                                    <option value="">-- All Sheets / Auto-detect --</option>
+                                </select>
                             </div>
                         </div>
-                        <div id="template-sheet-selection" style="display:none;">
-                            <label class="block text-sm font-medium text-gray-700 mb-2">
-                                Template Sheet (Optional)
-                                <span class="text-gray-500 text-xs ml-1">Select sheet if template has multiple sheets</span>
-                            </label>
-                            <select id="template_sheet" name="template_sheet" class="block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500">
-                                <option value="">-- All Sheets / Auto-detect --</option>
-                            </select>
+                    </div>
+                    
+                    <!-- Multiple Templates Mode -->
+                    <div id="multiple-templates-section" style="display:none;">
+                        <div class="space-y-3">
+                            <div class="flex space-x-2">
+                                <input type="file" id="multi_template_file" accept=".docx,.xlsx,.msg" class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100">
+                                <button type="button" onclick="addTemplate()" class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg whitespace-nowrap">
+                                    <i class="fas fa-plus mr-1"></i> Add
+                                </button>
+                            </div>
+                            <p class="text-xs text-gray-500">Add multiple templates. They will be processed in priority order and merged.</p>
+                            
+                            <!-- Templates Table -->
+                            <div id="templates-table-container" style="display:none;">
+                                <table class="min-w-full divide-y divide-gray-200 border">
+                                    <thead class="bg-gray-50">
+                                        <tr>
+                                            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Priority</th>
+                                            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">File</th>
+                                            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Sheet</th>
+                                            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="templates-table-body" class="bg-white divide-y divide-gray-200">
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
                     </div>
                 </div>
