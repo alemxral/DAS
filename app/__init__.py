@@ -2,6 +2,7 @@
 Flask Application Initialization
 """
 import os
+import sys
 from pathlib import Path
 from flask import Flask, render_template
 from flask_cors import CORS
@@ -18,8 +19,13 @@ def create_app(config_class=Config):
     Returns:
         Configured Flask application
     """
-    # Get the project root directory
-    project_root = Path(__file__).parent.parent
+    # Get the project root directory - handle PyInstaller
+    if getattr(sys, 'frozen', False):
+        # Running in PyInstaller bundle
+        project_root = Path(sys._MEIPASS)
+    else:
+        # Running in normal Python environment
+        project_root = Path(__file__).parent.parent
     
     # Create Flask app with correct template and static folders
     app = Flask(

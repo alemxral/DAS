@@ -53,13 +53,12 @@ if not exist ".env" (
 )
 
 REM Start the application
-echo [4/4] Starting the application...
+echo [4/4] Starting the desktop application...
 echo.
 echo ============================================================
-echo Server will start at http://localhost:5000
-echo Press Ctrl+C to stop the server
+echo Document Automation System starting...
 echo ============================================================
 echo.
-python run.py
+python main.py
 
 pause

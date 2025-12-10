@@ -4,6 +4,43 @@ const API_BASE = '/api';
 let refreshInterval = null;
 let templatesData = [];  // Store templates for multi-template mode
 
+// Toast notification function
+function showToast(message, type = 'info', title = '') {
+    const container = document.getElementById('toastContainer');
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    
+    const icons = {
+        success: '✓',
+        error: '✕',
+        warning: '⚠',
+        info: 'ℹ'
+    };
+    
+    const titles = {
+        success: title || 'Success',
+        error: title || 'Error',
+        warning: title || 'Warning',
+        info: title || 'Info'
+    };
+    
+    toast.innerHTML = `
+        <div class="toast-icon">${icons[type]}</div>
+        <div class="toast-content">
+            <div class="toast-title">${titles[type]}</div>
+            <div class="toast-message">${message}</div>
+        </div>
+    `;
+    
+    container.appendChild(toast);
+    
+    // Auto remove after 5 seconds
+    setTimeout(() => {
+        toast.style.animation = 'slideIn 0.3s ease-out reverse';
+        setTimeout(() => toast.remove(), 300);
+    }, 5000);
+}
+
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', function() {
     loadDashboardData();
@@ -783,11 +820,8 @@ function editJobFromDetails(jobId) {
 
 // Rerun a job with same settings
 async function rerunJob(jobId) {
-    if (!confirm('This will create a new job with the same settings and reprocess all data. Continue?')) {
-        return;
-    }
-    
     try {
+        showToast('Processing job rerun...', 'info');
         const response = await fetch(`${API_BASE}/jobs/${jobId}/rerun`, {
             method: 'POST'
         });
@@ -808,11 +842,8 @@ async function rerunJob(jobId) {
 
 // Delete a job
 async function deleteJob(jobId) {
-    if (!confirm('Are you sure you want to delete this job? This action cannot be undone.')) {
-        return;
-    }
-    
     try {
+        showToast('Deleting job...', 'info');
         const response = await fetch(`${API_BASE}/jobs/${jobId}`, {
             method: 'DELETE'
         });
@@ -1256,11 +1287,11 @@ function formatFileSize(bytes) {
 }
 
 function showError(message) {
-    alert('Error: ' + message);
+    showToast(message, 'error');
 }
 
 function showSuccess(message) {
-    alert(message);
+    showToast(message, 'success');
 }
 
 // Multi-Template Management
