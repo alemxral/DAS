@@ -18,6 +18,13 @@ class JobStatus(Enum):
     CANCELLED = "cancelled"
 
 
+class JobType(Enum):
+    """Job type enumeration."""
+    TEMPLATE = "template"  # Traditional template variable substitution
+    SPLIT = "split"        # Split PDF/Word into multiple files
+    MERGE = "merge"        # Merge multiple PDFs/Words
+
+
 class Job:
     """Represents a document generation job."""
     
@@ -27,7 +34,8 @@ class Job:
         data_path: Optional[str] = None,
         output_formats: Optional[List[str]] = None,
         job_id: Optional[str] = None,
-        templates: Optional[List[Dict]] = None
+        templates: Optional[List[Dict]] = None,
+        job_type: Optional[str] = None
     ):
         """
         Initialize a Job.
@@ -38,8 +46,10 @@ class Job:
             output_formats: List of desired output formats
             job_id: Optional job ID (generated if not provided)
             templates: List of template dictionaries with path, priority, sheet info
+            job_type: Type of job - 'template', 'split', or 'merge'
         """
         self.id = job_id or str(uuid.uuid4())
+        self.job_type = JobType(job_type) if job_type else JobType.TEMPLATE
         self.template_path = template_path  # Keep for backward compatibility
         self.templates = templates or []  # New: list of template configs
         self.data_path = data_path
@@ -89,6 +99,7 @@ class Job:
         
         return {
             'id': self.id,
+            'job_type': self.job_type.value,
             'template_path': actual_template_path,  # Legacy support
             'templates': templates_list,  # New multi-template support
             'data_path': actual_data_path,
@@ -128,7 +139,8 @@ class Job:
             template_path=data.get('template_path'),
             data_path=data.get('data_path'),
             output_formats=data.get('output_formats', []),
-            job_id=data.get('id')
+            job_id=data.get('id'),
+            job_type=data.get('job_type', 'template')
         )
         
         # Set status

@@ -233,6 +233,7 @@ class JobManager:
     def process_job(self, job_id: str) -> Job:
         """
         Process a job to generate documents.
+        Delegates to appropriate processor based on job type.
         
         Args:
             job_id: Job ID
@@ -250,6 +251,34 @@ class JobManager:
         job.update_status(JobStatus.PROCESSING)
         self.save_job_metadata(job)
         
+        try:
+            # Delegate to appropriate processor based on job type
+            from models.job import JobType
+            
+            if job.job_type == JobType.SPLIT:
+                return self._process_split_job(job)
+            elif job.job_type == JobType.MERGE:
+                return self._process_merge_job(job)
+            else:  # JobType.TEMPLATE
+                return self._process_template_job(job)
+        
+        except Exception as e:
+            error_msg = f"Error processing job: {str(e)}"
+            print(error_msg)
+            job.update_status(JobStatus.FAILED, error_message=error_msg)
+            self.save_job_metadata(job)
+            raise
+    
+    def _process_template_job(self, job: 'Job') -> 'Job':
+        """
+        Process a template job (original functionality).
+        
+        Args:
+            job: Job instance
+            
+        Returns:
+            Updated Job instance
+        """
         try:
             # Parse data file with optional sheet name
             data_sheet = job.metadata.get('data_sheet', None)
@@ -603,6 +632,202 @@ class JobManager:
             raise RuntimeError(f"No files found to archive in {source_dir}")
         
         print(f"ZIP archive created with {file_count} files")
+    
+    def _process_split_job(self, job: 'Job') -> 'Job':
+        """
+        Process a split job (PDF/Word splitting).
+        
+        Args:
+            job: Job instance
+            
+        Returns:
+            Updated Job instance
+        """
+        try:
+            from services.pdf_operations import PDFSplitter
+            from services.word_operations import WordSplitter
+            
+            # Get split configuration from metadata
+            split_config = job.metadata.get('split_config', {})
+            split_type = split_config.get('split_type', 'by_count')
+            pages_per_split = split_config.get('pages_per_split', 1)
+            names_file_path = split_config.get('names_file_path')
+            input_file_path = job.metadata.get('job_data_path')  # Using data_path for input file
+            
+            if not input_file_path:
+                raise ValueError("Input file path not found")
+            
+            # Create output directory
+            output_dir = self.get_job_dir(job.id) / "outputs" / "splits"
+            output_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Determine file type
+            file_ext = Path(input_file_path).suffix.lower()
+            base_name = Path(input_file_path).stem
+            
+            print(f"Starting split job: {split_type}, {pages_per_split} pages per split")
+            
+            # Perform splitting
+            output_files = []
+            
+            if file_ext == '.pdf':
+                splitter = PDFSplitter(input_file_path)
+                
+                if split_type == 'by_names' and names_file_path:
+                    output_files = splitter.split_by_names(names_file_path, pages_per_split, str(output_dir))
+                else:
+                    output_files = splitter.split_by_count(pages_per_split, str(output_dir), base_name)
+            
+            elif file_ext in ['.docx', '.doc']:
+                splitter = WordSplitter(input_file_path)
+                
+                if split_type == 'by_names' and names_file_path:
+                    output_files = splitter.split_by_names(names_file_path, pages_per_split, str(output_dir))
+                else:
+                    output_files = splitter.split_by_pages(pages_per_split, str(output_dir), base_name)
+            
+            else:
+                raise ValueError(f"Unsupported file type for splitting: {file_ext}")
+            
+            # Add output files to job
+            for file_path in output_files:
+                job.add_output_file(file_path)
+            
+            job.total_records = len(output_files)
+            job.processed_records = len(output_files)
+            
+            print(f"Split job completed: {len(output_files)} files created")
+            
+            # Create ZIP archive
+            zip_file = self.get_job_dir(job.id) / "output.zip"
+            self._create_zip_archive(output_dir, zip_file)
+            job.set_zip_file(str(zip_file))
+            
+            job.update_status(JobStatus.COMPLETED)
+            self.save_job_metadata(job)
+            
+            return job
+        
+        except Exception as e:
+            error_msg = f"Error in split job: {str(e)}"
+            print(error_msg)
+            job.update_status(JobStatus.FAILED, error_message=error_msg)
+            self.save_job_metadata(job)
+            raise
+    
+    def _process_merge_job(self, job: 'Job') -> 'Job':
+        """
+        Process a merge job (PDF/Word merging).
+        
+        Args:
+            job: Job instance
+            
+        Returns:
+            Updated Job instance
+        """
+        try:
+            from services.pdf_operations import PDFMerger
+            from services.word_operations import WordMerger
+            
+            # Get merge configuration from metadata
+            merge_config = job.metadata.get('merge_config', {})
+            merge_mode = merge_config.get('merge_mode', 'paired')
+            file_paths = merge_config.get('file_paths')
+            directory_path = merge_config.get('directory_path')
+            
+            # Create output directory
+            output_dir = self.get_job_dir(job.id) / "outputs" / "merged"
+            output_dir.mkdir(parents=True, exist_ok=True)
+            
+            print(f"Starting merge job: {merge_mode} mode")
+            
+            # Determine file type and get file paths
+            if merge_mode == 'paired':
+                if not file_paths or len(file_paths) != 2:
+                    raise ValueError("Paired merge requires exactly 2 files")
+                
+                file1_path = file_paths[0]
+                file2_path = file_paths[1]
+                
+                # Determine file types
+                file1_ext = Path(file1_path).suffix.lower()
+                file2_ext = Path(file2_path).suffix.lower()
+                
+                if file1_ext != file2_ext:
+                    raise ValueError(f"Cannot merge different file types: {file1_ext} and {file2_ext}")
+                
+                output_file = output_dir / f"merged{file1_ext}"
+                
+                # Perform paired merging
+                if file1_ext == '.pdf':
+                    merger = PDFMerger()
+                    result_file = merger.merge_paired(file1_path, file2_path, str(output_file))
+                elif file1_ext in ['.docx', '.doc']:
+                    merger = WordMerger()
+                    result_file = merger.merge_paired(file1_path, file2_path, str(output_file))
+                else:
+                    raise ValueError(f"Unsupported file type for merging: {file1_ext}")
+            
+            else:  # sequential mode
+                if directory_path:
+                    # Merge all files from directory
+                    # Detect file type from directory contents
+                    import glob
+                    pdf_files = glob.glob(os.path.join(directory_path, "*.pdf"))
+                    word_files = glob.glob(os.path.join(directory_path, "*.docx")) + glob.glob(os.path.join(directory_path, "*.doc"))
+                    
+                    if pdf_files:
+                        file_ext = '.pdf'
+                        output_file = output_dir / f"merged{file_ext}"
+                        merger = PDFMerger()
+                        result_file = merger.merge_directory(directory_path, str(output_file), file_ext)
+                    elif word_files:
+                        file_ext = '.docx'
+                        output_file = output_dir / f"merged{file_ext}"
+                        merger = WordMerger()
+                        result_file = merger.merge_directory(directory_path, str(output_file))
+                    else:
+                        raise ValueError(f"No PDF or Word files found in directory: {directory_path}")
+                
+                elif file_paths and len(file_paths) > 0:
+                    # Merge specific files
+                    first_ext = Path(file_paths[0]).suffix.lower()
+                    output_file = output_dir / f"merged{first_ext}"
+                    
+                    if first_ext == '.pdf':
+                        merger = PDFMerger()
+                        result_file = merger.merge_sequential(file_paths, str(output_file))
+                    elif first_ext in ['.docx', '.doc']:
+                        merger = WordMerger()
+                        result_file = merger.merge_sequential(file_paths, str(output_file))
+                    else:
+                        raise ValueError(f"Unsupported file type for merging: {first_ext}")
+                else:
+                    raise ValueError("No files or directory path provided for sequential merge")
+            
+            # Add output file to job
+            job.add_output_file(result_file)
+            job.total_records = 1
+            job.processed_records = 1
+            
+            print(f"Merge job completed: {result_file}")
+            
+            # Create ZIP archive
+            zip_file = self.get_job_dir(job.id) / "output.zip"
+            self._create_zip_archive(output_dir, zip_file)
+            job.set_zip_file(str(zip_file))
+            
+            job.update_status(JobStatus.COMPLETED)
+            self.save_job_metadata(job)
+            
+            return job
+        
+        except Exception as e:
+            error_msg = f"Error in merge job: {str(e)}"
+            print(error_msg)
+            job.update_status(JobStatus.FAILED, error_message=error_msg)
+            self.save_job_metadata(job)
+            raise
     
     def get_job_output_files(self, job_id: str) -> List[str]:
         """

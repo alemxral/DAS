@@ -310,6 +310,245 @@ def create_job():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@api_bp.route('/split-jobs', methods=['POST'])
+def create_split_job():
+    """Create a new split job."""
+    try:
+        manager = get_job_manager()
+        
+        # Handle file upload
+        input_file_path = None
+        names_file_path = None
+        
+        if 'input_file' in request.files:
+            input_file = request.files['input_file']
+            if input_file and input_file.filename:
+                ext = Path(input_file.filename).suffix.lower()
+                if ext not in ['.pdf', '.docx', '.doc']:
+                    return jsonify({'success': False, 'error': 'Invalid file format. Only PDF and Word files supported.'}), 400
+                
+                filename = secure_filename(input_file.filename)
+                upload_dir = Path(current_app.config['UPLOAD_DIR'])
+                upload_dir.mkdir(parents=True, exist_ok=True)
+                input_file_path = upload_dir / filename
+                input_file.save(str(input_file_path))
+        
+        if 'names_file' in request.files:
+            names_file = request.files['names_file']
+            if names_file and names_file.filename:
+                ext = Path(names_file.filename).suffix.lower()
+                if ext not in ['.xlsx', '.xls', '.txt']:
+                    return jsonify({'success': False, 'error': 'Invalid names file format. Only Excel and TXT supported.'}), 400
+                
+                filename = secure_filename(names_file.filename)
+                upload_dir = Path(current_app.config['UPLOAD_DIR'])
+                names_file_path = upload_dir / filename
+                names_file.save(str(names_file_path))
+        
+        # Handle path (if file not uploaded)
+        if not input_file_path and request.form.get('input_path'):
+            input_file_path = request.form.get('input_path')
+            if not os.path.exists(input_file_path):
+                return jsonify({'success': False, 'error': 'Input file not found'}), 400
+        
+        if not names_file_path and request.form.get('names_path'):
+            names_file_path = request.form.get('names_path')
+        
+        # Validate input
+        if not input_file_path:
+            return jsonify({'success': False, 'error': 'Input file is required'}), 400
+        
+        # Get split configuration
+        split_type = request.form.get('split_type', 'by_count')
+        pages_per_split = int(request.form.get('pages_per_split', 1))
+        
+        if pages_per_split <= 0:
+            return jsonify({'success': False, 'error': 'pages_per_split must be greater than 0'}), 400
+        
+        if split_type == 'by_names' and not names_file_path:
+            return jsonify({'success': False, 'error': 'Names file is required for split by names'}), 400
+        
+        # Create job with split configuration
+        from models.job import Job
+        job = Job(
+            data_path=str(input_file_path),
+            job_type='split'
+        )
+        
+        # Store split configuration in metadata
+        job.metadata['job_data_path'] = str(input_file_path)
+        job.metadata['split_config'] = {
+            'split_type': split_type,
+            'pages_per_split': pages_per_split,
+            'names_file_path': str(names_file_path) if names_file_path else None
+        }
+        
+        # Save job
+        manager.jobs[job.id] = job
+        manager.save_job_metadata(job)
+        
+        # Start processing in background
+        auto_process = request.form.get('auto_process', 'true').lower() == 'true'
+        if auto_process:
+            thread = threading.Thread(target=manager.process_job, args=(job.id,))
+            thread.daemon = True
+            thread.start()
+        
+        return jsonify({
+            'success': True,
+            'job': job.to_dict(),
+            'message': 'Split job created successfully'
+        }), 201
+    
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@api_bp.route('/merge-jobs', methods=['POST'])
+def create_merge_job():
+    """Create a new merge job."""
+    try:
+        manager = get_job_manager()
+        
+        # Get merge configuration
+        merge_mode = request.form.get('merge_mode', 'paired')
+        
+        if merge_mode not in ['paired', 'sequential']:
+            return jsonify({'success': False, 'error': 'Invalid merge_mode. Use "paired" or "sequential"'}), 400
+        
+        file_paths = []
+        directory_path = None
+        
+        if merge_mode == 'paired':
+            # Paired mode: exactly 2 files required
+            file1_path = None
+            file2_path = None
+            
+            if 'file1' in request.files:
+                file1 = request.files['file1']
+                if file1 and file1.filename:
+                    ext = Path(file1.filename).suffix.lower()
+                    if ext not in ['.pdf', '.docx', '.doc']:
+                        return jsonify({'success': False, 'error': 'Invalid file1 format. Only PDF and Word files supported.'}), 400
+                    
+                    filename = secure_filename(file1.filename)
+                    upload_dir = Path(current_app.config['UPLOAD_DIR'])
+                    upload_dir.mkdir(parents=True, exist_ok=True)
+                    file1_path = upload_dir / filename
+                    file1.save(str(file1_path))
+            
+            if 'file2' in request.files:
+                file2 = request.files['file2']
+                if file2 and file2.filename:
+                    ext = Path(file2.filename).suffix.lower()
+                    if ext not in ['.pdf', '.docx', '.doc']:
+                        return jsonify({'success': False, 'error': 'Invalid file2 format. Only PDF and Word files supported.'}), 400
+                    
+                    filename = secure_filename(file2.filename)
+                    upload_dir = Path(current_app.config['UPLOAD_DIR'])
+                    file2_path = upload_dir / filename
+                    file2.save(str(file2_path))
+            
+            # Handle paths (if files not uploaded)
+            if not file1_path and request.form.get('file1_path'):
+                file1_path = request.form.get('file1_path')
+                if not os.path.exists(file1_path):
+                    return jsonify({'success': False, 'error': 'File1 not found'}), 400
+            
+            if not file2_path and request.form.get('file2_path'):
+                file2_path = request.form.get('file2_path')
+                if not os.path.exists(file2_path):
+                    return jsonify({'success': False, 'error': 'File2 not found'}), 400
+            
+            # Validate inputs
+            if not file1_path or not file2_path:
+                return jsonify({'success': False, 'error': 'Two input files are required for paired merge'}), 400
+            
+            # Check file types match
+            ext1 = Path(file1_path).suffix.lower()
+            ext2 = Path(file2_path).suffix.lower()
+            if ext1 != ext2:
+                return jsonify({'success': False, 'error': 'Both files must be the same format'}), 400
+            
+            file_paths = [str(file1_path), str(file2_path)]
+        
+        else:  # sequential mode
+            # Sequential mode: multiple files or directory path
+            sequential_source = request.form.get('sequential_source', 'files')
+            
+            if sequential_source == 'path':
+                # Directory path
+                directory_path = request.form.get('directory_path', '').strip()
+                if not directory_path:
+                    return jsonify({'success': False, 'error': 'Directory path is required'}), 400
+                if not os.path.exists(directory_path):
+                    return jsonify({'success': False, 'error': 'Directory not found'}), 400
+                if not os.path.isdir(directory_path):
+                    return jsonify({'success': False, 'error': 'Path is not a directory'}), 400
+            
+            else:
+                # Multiple files
+                uploaded_files = request.files.getlist('files')
+                
+                if not uploaded_files or len(uploaded_files) == 0:
+                    return jsonify({'success': False, 'error': 'At least one file is required for sequential merge'}), 400
+                
+                upload_dir = Path(current_app.config['UPLOAD_DIR'])
+                upload_dir.mkdir(parents=True, exist_ok=True)
+                
+                # Validate all files are the same format
+                first_ext = None
+                for file in uploaded_files:
+                    if file and file.filename:
+                        ext = Path(file.filename).suffix.lower()
+                        if ext not in ['.pdf', '.docx', '.doc']:
+                            return jsonify({'success': False, 'error': f'Invalid file format: {file.filename}. Only PDF and Word files supported.'}), 400
+                        
+                        if first_ext is None:
+                            first_ext = ext
+                        elif ext != first_ext:
+                            return jsonify({'success': False, 'error': 'All files must be the same format'}), 400
+                        
+                        filename = secure_filename(file.filename)
+                        file_path = upload_dir / filename
+                        file.save(str(file_path))
+                        file_paths.append(str(file_path))
+        
+        # Create job with merge configuration
+        from models.job import Job
+        job = Job(
+            job_type='merge'
+        )
+        
+        # Store merge configuration in metadata
+        job.metadata['merge_config'] = {
+            'merge_mode': merge_mode,
+            'file_paths': file_paths if file_paths else None,
+            'directory_path': directory_path if directory_path else None,
+            'sequential_source': request.form.get('sequential_source') if merge_mode == 'sequential' else None
+        }
+        
+        # Save job
+        manager.jobs[job.id] = job
+        manager.save_job_metadata(job)
+        
+        # Start processing in background
+        auto_process = request.form.get('auto_process', 'true').lower() == 'true'
+        if auto_process:
+            thread = threading.Thread(target=manager.process_job, args=(job.id,))
+            thread.daemon = True
+            thread.start()
+        
+        return jsonify({
+            'success': True,
+            'job': job.to_dict(),
+            'message': 'Merge job created successfully'
+        }), 201
+    
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @api_bp.route('/jobs/<job_id>/process', methods=['POST'])
 def process_job(job_id):
     """Start processing a job."""

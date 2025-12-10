@@ -46,6 +46,17 @@
         .status-processing { background-color: #dbeafe; color: #1e40af; }
         .status-completed { background-color: #d1fae5; color: #065f46; }
         .status-failed { background-color: #fee2e2; color: #991b1b; }
+        .job-type-badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+        .job-type-template { background-color: #dcfce7; color: #166534; }
+        .job-type-split { background-color: #e9d5ff; color: #6b21a8; }
+        .job-type-merge { background-color: #dbeafe; color: #1e3a8a; }
     </style>
 </head>
 <body class="bg-gray-50">
@@ -57,10 +68,16 @@
                     <i class="fas fa-file-alt text-3xl text-blue-600"></i>
                     <h1 class="text-2xl font-bold text-gray-900">Document Automation System</h1>
                 </div>
-                <button onclick="openCreateJobModal()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg flex items-center space-x-2 transition">
-                    <i class="fas fa-plus"></i>
-                    <span>New Job</span>
-                </button>
+                <div class="flex space-x-3">
+                    <button onclick="openOperationsModal()" class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg flex items-center space-x-2 transition">
+                        <i class="fas fa-cut"></i>
+                        <span>Operations</span>
+                    </button>
+                    <button onclick="openCreateJobModal()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg flex items-center space-x-2 transition">
+                        <i class="fas fa-plus"></i>
+                        <span>New Job</span>
+                    </button>
+                </div>
             </div>
         </div>
     </header>
@@ -452,6 +469,157 @@
                     </button>
                     <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
                         Create Job
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Operations Modal -->
+    <div id="operationsModal" class="modal fixed inset-0 bg-black bg-opacity-50 items-center justify-center z-50">
+        <div class="bg-white rounded-lg shadow-xl max-w-3xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+            <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+                <h3 class="text-xl font-semibold text-gray-900">Document Operations</h3>
+                <button onclick="closeOperationsModal()" class="text-gray-400 hover:text-gray-600">
+                    <i class="fas fa-times text-xl"></i>
+                </button>
+            </div>
+            
+            <!-- Operation Type Tabs -->
+            <div class="border-b border-gray-200">
+                <nav class="flex -mb-px">
+                    <button onclick="switchOperationType('split')" id="tab-split" class="operation-tab px-6 py-3 border-b-2 border-purple-500 text-purple-600 font-medium">
+                        <i class="fas fa-cut mr-2"></i>Split Documents
+                    </button>
+                    <button onclick="switchOperationType('merge')" id="tab-merge" class="operation-tab px-6 py-3 border-b-2 border-transparent text-gray-500 hover:text-gray-700 font-medium">
+                        <i class="fas fa-object-group mr-2"></i>Merge Documents
+                    </button>
+                </nav>
+            </div>
+            
+            <!-- Split Operation Form -->
+            <form id="splitOperationForm" class="p-6 space-y-6">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Input File (PDF or Word)</label>
+                    <div class="space-y-3">
+                        <div>
+                            <label class="inline-flex items-center">
+                                <input type="radio" name="split_input_source" value="file" checked class="form-radio">
+                                <span class="ml-2">Upload File</span>
+                            </label>
+                            <label class="inline-flex items-center ml-6">
+                                <input type="radio" name="split_input_source" value="path" class="form-radio">
+                                <span class="ml-2">File Path</span>
+                            </label>
+                        </div>
+                        <input type="file" id="split_input_file" class="w-full px-3 py-2 border border-gray-300 rounded-lg" accept=".pdf,.docx,.doc">
+                        <input type="text" id="split_input_path" class="w-full px-3 py-2 border border-gray-300 rounded-lg hidden" placeholder="C:\path\to\file.pdf">
+                    </div>
+                </div>
+                
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Split Type</label>
+                    <div class="space-y-3">
+                        <label class="flex items-center">
+                            <input type="radio" name="split_type" value="by_count" checked class="form-radio" onchange="toggleSplitOptions()">
+                            <span class="ml-2">Split by Page Count</span>
+                        </label>
+                        <label class="flex items-center">
+                            <input type="radio" name="split_type" value="by_names" class="form-radio" onchange="toggleSplitOptions()">
+                            <span class="ml-2">Split by Name List (Excel/TXT)</span>
+                        </label>
+                    </div>
+                </div>
+                
+                <div id="split-count-options">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Pages per Split</label>
+                    <input type="number" id="pages_per_split" value="1" min="1" class="w-full px-3 py-2 border border-gray-300 rounded-lg">
+                    <p class="text-sm text-gray-500 mt-1">Number of pages to include in each split file</p>
+                </div>
+                
+                <div id="split-names-options" class="hidden">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Name List File (Excel or TXT)</label>
+                    <input type="file" id="split_names_file" class="w-full px-3 py-2 border border-gray-300 rounded-lg" accept=".xlsx,.xls,.txt">
+                    <p class="text-sm text-gray-500 mt-1">Excel file with names in first column, or TXT with one name per line</p>
+                    
+                    <label class="block text-sm font-medium text-gray-700 mb-2 mt-4">Pages per Named File</label>
+                    <input type="number" id="pages_per_named_split" value="1" min="1" class="w-full px-3 py-2 border border-gray-300 rounded-lg">
+                </div>
+                
+                <div class="flex justify-end space-x-3 pt-4 border-t">
+                    <button type="button" onclick="closeOperationsModal()" class="px-4 py-2 text-gray-700 hover:text-gray-900">
+                        Cancel
+                    </button>
+                    <button type="submit" class="bg-purple-600 hover:bg-purple-700 text-white px-6 py-2 rounded-lg">
+                        <i class="fas fa-cut mr-2"></i>
+                        Start Split
+                    </button>
+                </div>
+            </form>
+            
+            <!-- Merge Operation Form -->
+            <form id="mergeOperationForm" class="p-6 space-y-6 hidden">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Merge Mode</label>
+                    <div class="space-y-3">
+                        <label class="flex items-center">
+                            <input type="radio" name="merge_mode" value="paired" checked class="form-radio" onchange="toggleMergeMode()">
+                            <span class="ml-2">Paired Merge (Interleave pages: 1A, 1B, 2A, 2B, ...)</span>
+                        </label>
+                        <label class="flex items-center">
+                            <input type="radio" name="merge_mode" value="sequential" class="form-radio" onchange="toggleMergeMode()">
+                            <span class="ml-2">Sequential Merge (Merge multiple files in order)</span>
+                        </label>
+                    </div>
+                </div>
+                
+                <!-- Paired Mode: Two files -->
+                <div id="merge-paired-section">
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">First File (PDF or Word)</label>
+                        <input type="file" id="merge_file1" class="w-full px-3 py-2 border border-gray-300 rounded-lg" accept=".pdf,.docx,.doc">
+                    </div>
+                    
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Second File (PDF or Word)</label>
+                        <input type="file" id="merge_file2" class="w-full px-3 py-2 border border-gray-300 rounded-lg" accept=".pdf,.docx,.doc">
+                        <p class="text-sm text-gray-500 mt-1">Both files must be the same format (both PDF or both Word)</p>
+                    </div>
+                </div>
+                
+                <!-- Sequential Mode: Multiple files or directory -->
+                <div id="merge-sequential-section" class="hidden">
+                    <div>
+                        <label class="inline-flex items-center mb-3">
+                            <input type="radio" name="sequential_source" value="files" checked class="form-radio" onchange="toggleSequentialSource()">
+                            <span class="ml-2">Select Multiple Files</span>
+                        </label>
+                        <label class="inline-flex items-center ml-6 mb-3">
+                            <input type="radio" name="sequential_source" value="path" class="form-radio" onchange="toggleSequentialSource()">
+                            <span class="ml-2">Directory Path</span>
+                        </label>
+                    </div>
+                    
+                    <div id="sequential-files-input">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Select Files (PDF or Word)</label>
+                        <input type="file" id="merge_multiple_files" multiple class="w-full px-3 py-2 border border-gray-300 rounded-lg" accept=".pdf,.docx,.doc">
+                        <p class="text-sm text-gray-500 mt-1">Select multiple files to merge in order. All files must be the same format.</p>
+                    </div>
+                    
+                    <div id="sequential-path-input" class="hidden">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Directory Path</label>
+                        <input type="text" id="merge_directory_path" class="w-full px-3 py-2 border border-gray-300 rounded-lg" placeholder="C:\path\to\folder">
+                        <p class="text-sm text-gray-500 mt-1">All PDF or Word files in this directory will be merged alphabetically.</p>
+                    </div>
+                </div>
+                
+                <div class="flex justify-end space-x-3 pt-4 border-t">
+                    <button type="button" onclick="closeOperationsModal()" class="px-4 py-2 text-gray-700 hover:text-gray-900">
+                        Cancel
+                    </button>
+                    <button type="submit" class="bg-purple-600 hover:bg-purple-700 text-white px-6 py-2 rounded-lg">
+                        <i class="fas fa-object-group mr-2"></i>
+                        Start Merge
                     </button>
                 </div>
             </form>

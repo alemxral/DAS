@@ -84,6 +84,16 @@ function createJobCard(job) {
         'failed': 'fa-exclamation-circle'
     }[job.status] || 'fa-question-circle';
     
+    // Job type badge
+    const jobType = job.job_type || 'template';
+    const jobTypeClass = `job-type-${jobType}`;
+    const jobTypeIcon = {
+        'template': 'fa-file-alt',
+        'split': 'fa-cut',
+        'merge': 'fa-object-group'
+    }[jobType] || 'fa-file-alt';
+    const jobTypeLabel = jobType.charAt(0).toUpperCase() + jobType.slice(1);
+    
     const progress = job.total_records > 0 
         ? Math.round((job.processed_records / job.total_records) * 100) 
         : 0;
@@ -92,7 +102,13 @@ function createJobCard(job) {
         <div class="job-card bg-white rounded-lg shadow-md p-6 cursor-pointer hover:shadow-lg transition-shadow" onclick="openJobDetails('${job.id}')">
             <div class="flex justify-between items-start mb-4">
                 <div>
-                    <h3 class="text-lg font-semibold text-gray-900 truncate">Job ${job.id.substring(0, 8)}</h3>
+                    <div class="flex items-center gap-2 mb-1">
+                        <h3 class="text-lg font-semibold text-gray-900">Job ${job.id.substring(0, 8)}</h3>
+                        <span class="job-type-badge ${jobTypeClass}">
+                            <i class="fas ${jobTypeIcon} mr-1"></i>
+                            ${jobTypeLabel}
+                        </span>
+                    </div>
                     <p class="text-sm text-gray-500">${new Date(job.created_at).toLocaleString()}</p>
                 </div>
                 <span class="status-badge ${statusClass}">
@@ -148,20 +164,26 @@ function createJobCard(job) {
                     <button onclick="viewJobFiles('${job.id}'); event.stopPropagation();" class="flex-1 bg-gray-600 hover:bg-gray-700 text-white px-3 py-2 rounded-lg text-sm transition">
                         <i class="fas fa-eye mr-1"></i> View
                     </button>
-                    <button onclick="rerunJob('${job.id}'); event.stopPropagation();" class="flex-1 bg-green-600 hover:bg-green-700 text-white px-3 py-2 rounded-lg text-sm transition">
-                        <i class="fas fa-redo mr-1"></i> Rerun
-                    </button>
+                    ${jobType === 'template' ? `
+                        <button onclick="rerunJob('${job.id}'); event.stopPropagation();" class="flex-1 bg-green-600 hover:bg-green-700 text-white px-3 py-2 rounded-lg text-sm transition">
+                            <i class="fas fa-redo mr-1"></i> Rerun
+                        </button>
+                    ` : ''}
                 ` : job.status === 'pending' ? `
-                    <button onclick="processJob('${job.id}'); event.stopPropagation();" class="flex-1 bg-green-600 hover:bg-green-700 text-white px-3 py-2 rounded-lg text-sm transition">
-                        <i class="fas fa-play mr-1"></i> Process
-                    </button>
-                    <button onclick="editJob('${job.id}'); event.stopPropagation();" class="flex-1 bg-purple-600 hover:bg-purple-700 text-white px-3 py-2 rounded-lg text-sm transition">
-                        <i class="fas fa-edit mr-1"></i> Edit
-                    </button>
+                    ${jobType === 'template' ? `
+                        <button onclick="processJob('${job.id}'); event.stopPropagation();" class="flex-1 bg-green-600 hover:bg-green-700 text-white px-3 py-2 rounded-lg text-sm transition">
+                            <i class="fas fa-play mr-1"></i> Process
+                        </button>
+                        <button onclick="editJob('${job.id}'); event.stopPropagation();" class="flex-1 bg-purple-600 hover:bg-purple-700 text-white px-3 py-2 rounded-lg text-sm transition">
+                            <i class="fas fa-edit mr-1"></i> Edit
+                        </button>
+                    ` : ''}
                 ` : job.status === 'failed' ? `
-                    <button onclick="rerunJob('${job.id}'); event.stopPropagation();" class="flex-1 bg-green-600 hover:bg-green-700 text-white px-3 py-2 rounded-lg text-sm transition">
-                        <i class="fas fa-redo mr-1"></i> Retry
-                    </button>
+                    ${jobType === 'template' ? `
+                        <button onclick="rerunJob('${job.id}'); event.stopPropagation();" class="flex-1 bg-green-600 hover:bg-green-700 text-white px-3 py-2 rounded-lg text-sm transition">
+                            <i class="fas fa-redo mr-1"></i> Retry
+                        </button>
+                    ` : ''}
                 ` : ''}
                 <button onclick="deleteJob('${job.id}'); event.stopPropagation();" class="bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-lg text-sm transition">
                     <i class="fas fa-trash"></i>
@@ -1369,6 +1391,244 @@ function movePriority(index, direction) {
     
     renderTemplatesTable();
 }
+
+// ==================== OPERATIONS MODAL FUNCTIONS ====================
+
+function openOperationsModal() {
+    document.getElementById('operationsModal').classList.add('active');
+    switchOperationType('split'); // Default to split tab
+}
+
+function closeOperationsModal() {
+    document.getElementById('operationsModal').classList.remove('active');
+    document.getElementById('splitOperationForm').reset();
+    document.getElementById('mergeOperationForm').reset();
+}
+
+function switchOperationType(type) {
+    // Update tabs
+    const splitTab = document.getElementById('tab-split');
+    const mergeTab = document.getElementById('tab-merge');
+    const splitForm = document.getElementById('splitOperationForm');
+    const mergeForm = document.getElementById('mergeOperationForm');
+    
+    if (type === 'split') {
+        splitTab.classList.add('border-purple-500', 'text-purple-600');
+        splitTab.classList.remove('border-transparent', 'text-gray-500');
+        mergeTab.classList.remove('border-purple-500', 'text-purple-600');
+        mergeTab.classList.add('border-transparent', 'text-gray-500');
+        splitForm.classList.remove('hidden');
+        mergeForm.classList.add('hidden');
+    } else {
+        mergeTab.classList.add('border-purple-500', 'text-purple-600');
+        mergeTab.classList.remove('border-transparent', 'text-gray-500');
+        splitTab.classList.remove('border-purple-500', 'text-purple-600');
+        splitTab.classList.add('border-transparent', 'text-gray-500');
+        mergeForm.classList.remove('hidden');
+        splitForm.classList.add('hidden');
+    }
+}
+
+function toggleSplitOptions() {
+    const splitType = document.querySelector('input[name="split_type"]:checked').value;
+    const countOptions = document.getElementById('split-count-options');
+    const namesOptions = document.getElementById('split-names-options');
+    
+    if (splitType === 'by_count') {
+        countOptions.classList.remove('hidden');
+        namesOptions.classList.add('hidden');
+    } else {
+        countOptions.classList.add('hidden');
+        namesOptions.classList.remove('hidden');
+    }
+}
+
+function toggleMergeMode() {
+    const mergeMode = document.querySelector('input[name="merge_mode"]:checked').value;
+    const pairedSection = document.getElementById('merge-paired-section');
+    const sequentialSection = document.getElementById('merge-sequential-section');
+    
+    if (mergeMode === 'paired') {
+        pairedSection.classList.remove('hidden');
+        sequentialSection.classList.add('hidden');
+    } else {
+        pairedSection.classList.add('hidden');
+        sequentialSection.classList.remove('hidden');
+    }
+}
+
+function toggleSequentialSource() {
+    const source = document.querySelector('input[name="sequential_source"]:checked').value;
+    const filesInput = document.getElementById('sequential-files-input');
+    const pathInput = document.getElementById('sequential-path-input');
+    
+    if (source === 'files') {
+        filesInput.classList.remove('hidden');
+        pathInput.classList.add('hidden');
+    } else {
+        filesInput.classList.add('hidden');
+        pathInput.classList.remove('hidden');
+    }
+}
+
+// Split form submission
+document.getElementById('splitOperationForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    
+    const splitType = document.querySelector('input[name="split_type"]:checked').value;
+    const inputSource = document.querySelector('input[name="split_input_source"]:checked').value;
+    
+    // Validate input file
+    const inputFile = inputSource === 'file' ? document.getElementById('split_input_file').files[0] : null;
+    const inputPath = inputSource === 'path' ? document.getElementById('split_input_path').value : null;
+    
+    if (!inputFile && !inputPath) {
+        showError('Please select an input file');
+        return;
+    }
+    
+    // Get pages per split
+    const pagesPerSplit = splitType === 'by_count' 
+        ? document.getElementById('pages_per_split').value 
+        : document.getElementById('pages_per_named_split').value;
+    
+    if (pagesPerSplit < 1) {
+        showError('Pages per split must be at least 1');
+        return;
+    }
+    
+    // Validate names file if needed
+    const namesFile = splitType === 'by_names' ? document.getElementById('split_names_file').files[0] : null;
+    if (splitType === 'by_names' && !namesFile) {
+        showError('Please select a names file');
+        return;
+    }
+    
+    // Create FormData
+    const formData = new FormData();
+    
+    if (inputFile) {
+        formData.append('input_file', inputFile);
+    } else {
+        formData.append('input_path', inputPath);
+    }
+    
+    formData.append('split_type', splitType);
+    formData.append('pages_per_split', pagesPerSplit);
+    
+    if (namesFile) {
+        formData.append('names_file', namesFile);
+    }
+    
+    formData.append('auto_process', 'true');
+    
+    try {
+        const response = await fetch(`${API_BASE}/split-jobs`, {
+            method: 'POST',
+            body: formData
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showSuccess('Split job created successfully!');
+            closeOperationsModal();
+            loadDashboardData(); // Refresh jobs list
+        } else {
+            showError(result.error || 'Failed to create split job');
+        }
+    } catch (error) {
+        showError('Error creating split job: ' + error.message);
+    }
+});
+
+// Merge form submission
+document.getElementById('mergeOperationForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    
+    const mergeMode = document.querySelector('input[name="merge_mode"]:checked').value;
+    const formData = new FormData();
+    formData.append('merge_mode', mergeMode);
+    
+    if (mergeMode === 'paired') {
+        // Paired mode: validate 2 files
+        const file1 = document.getElementById('merge_file1').files[0];
+        const file2 = document.getElementById('merge_file2').files[0];
+        
+        if (!file1 || !file2) {
+            showError('Please select both files');
+            return;
+        }
+        
+        // Check file extensions match
+        const ext1 = file1.name.split('.').pop().toLowerCase();
+        const ext2 = file2.name.split('.').pop().toLowerCase();
+        
+        if (ext1 !== ext2) {
+            showError('Both files must be the same format (both PDF or both Word)');
+            return;
+        }
+        
+        formData.append('file1', file1);
+        formData.append('file2', file2);
+    } else {
+        // Sequential mode
+        const sequentialSource = document.querySelector('input[name="sequential_source"]:checked').value;
+        formData.append('sequential_source', sequentialSource);
+        
+        if (sequentialSource === 'files') {
+            // Multiple files
+            const files = document.getElementById('merge_multiple_files').files;
+            
+            if (!files || files.length === 0) {
+                showError('Please select at least one file');
+                return;
+            }
+            
+            // Validate all files are the same format
+            const firstExt = files[0].name.split('.').pop().toLowerCase();
+            for (let i = 0; i < files.length; i++) {
+                const ext = files[i].name.split('.').pop().toLowerCase();
+                if (ext !== firstExt) {
+                    showError('All files must be the same format');
+                    return;
+                }
+                formData.append('files', files[i]);
+            }
+        } else {
+            // Directory path
+            const directoryPath = document.getElementById('merge_directory_path').value.trim();
+            
+            if (!directoryPath) {
+                showError('Please enter a directory path');
+                return;
+            }
+            
+            formData.append('directory_path', directoryPath);
+        }
+    }
+    
+    formData.append('auto_process', 'true');
+    
+    try {
+        const response = await fetch(`${API_BASE}/merge-jobs`, {
+            method: 'POST',
+            body: formData
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showSuccess('Merge job created successfully!');
+            closeOperationsModal();
+            loadDashboardData(); // Refresh jobs list
+        } else {
+            showError(result.error || 'Failed to create merge job');
+        }
+    } catch (error) {
+        showError('Error creating merge job: ' + error.message);
+    }
+});
 
 function updateTemplateSheet(index, sheet) {
     templatesData[index].sheet = sheet || null;
