@@ -393,6 +393,12 @@ async function handleCreateJob(e) {
         formData.append('excel_print_settings', JSON.stringify(excelPrintSettings));
     }
     
+    // Add Excel auto-adjust options if applicable
+    const excelAutoAdjustOptions = getExcelAutoAdjustOptions();
+    if (excelAutoAdjustOptions) {
+        formData.append('excel_auto_adjust_options', JSON.stringify(excelAutoAdjustOptions));
+    }
+    
     // Add output directory if specified
     const outputDirectory = document.getElementById('output_directory').value.trim();
     if (outputDirectory) {
@@ -696,6 +702,22 @@ async function editJob(jobId) {
                     document.getElementById('center_v').checked = true;
                 }
             }
+            
+            // Populate Excel auto-adjust options if available
+            if (job.excel_auto_adjust_options) {
+                toggleExcelPrintSettings(); // This also toggles auto-adjust settings
+                
+                const options = job.excel_auto_adjust_options;
+                if (options.auto_adjust_height) {
+                    document.getElementById('auto_adjust_height').checked = true;
+                }
+                if (options.auto_adjust_width) {
+                    document.getElementById('auto_adjust_width').checked = true;
+                }
+                if (options.adjust_range) {
+                    document.getElementById('adjust_range').value = options.adjust_range;
+                }
+            }
         } else {
             showError('Failed to load job data');
         }
@@ -929,6 +951,11 @@ function closeCreateJobModal() {
     // Remove any notice messages from edit mode
     const notices = document.querySelectorAll('#multiple-templates-section .bg-yellow-50');
     notices.forEach(notice => notice.remove());
+    
+    // Reset Excel auto-adjust settings
+    document.getElementById('auto_adjust_height').checked = false;
+    document.getElementById('auto_adjust_width').checked = false;
+    document.getElementById('adjust_range').value = '';
 }
 
 function openPreviewModal() {
@@ -1225,6 +1252,12 @@ function toggleExcelPrintSettings() {
     
     // Show if Excel template AND (individual PDF OR merged PDF is selected)
     settingsDiv.style.display = ((pdfChecked || pdfMergedChecked) && isExcelTemplate) ? 'block' : 'none';
+    
+    // Also toggle auto-adjust settings for Excel templates
+    const autoAdjustSettings = document.getElementById('excel-auto-adjust-settings');
+    if (autoAdjustSettings) {
+        autoAdjustSettings.style.display = isExcelTemplate ? 'block' : 'none';
+    }
 }
 
 // Check if selected template is Excel
@@ -1317,6 +1350,34 @@ function getExcelPrintSettings() {
     };
     
     return settings;
+}
+
+// Get Excel auto-adjust options
+function getExcelAutoAdjustOptions() {
+    const autoAdjustSettings = document.getElementById('excel-auto-adjust-settings');
+    if (!autoAdjustSettings || autoAdjustSettings.style.display === 'none') {
+        return null;
+    }
+    
+    const autoAdjustHeight = document.getElementById('auto_adjust_height')?.checked;
+    const autoAdjustWidth = document.getElementById('auto_adjust_width')?.checked;
+    const adjustRange = document.getElementById('adjust_range')?.value.trim();
+    
+    // Only return options if at least one checkbox is checked
+    if (!autoAdjustHeight && !autoAdjustWidth) {
+        return null;
+    }
+    
+    const options = {
+        auto_adjust_height: autoAdjustHeight,
+        auto_adjust_width: autoAdjustWidth
+    };
+    
+    if (adjustRange) {
+        options.adjust_range = adjustRange;
+    }
+    
+    return options;
 }
 
 // Utility functions

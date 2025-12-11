@@ -261,6 +261,14 @@ def create_job():
             except:
                 pass
         
+        # Get Excel auto-adjust options if provided
+        excel_auto_adjust_options = None
+        if request.form.get('excel_auto_adjust_options'):
+            try:
+                excel_auto_adjust_options = json.loads(request.form.get('excel_auto_adjust_options'))
+            except:
+                pass
+        
         # Get filename variable if provided
         filename_variable = request.form.get('filename_variable', '##filename##').strip()
         
@@ -285,6 +293,7 @@ def create_job():
             data_path=str(data_path),
             output_formats=output_formats,
             excel_print_settings=excel_print_settings,
+            excel_auto_adjust_options=excel_auto_adjust_options,
             output_directory=output_directory if output_directory else None,
             filename_variable=filename_variable,
             tabname_variable=tabname_variable,

@@ -77,6 +77,7 @@ class JobManager:
         data_path: str,
         output_formats: List[str],
         excel_print_settings: Optional[Dict] = None,
+        excel_auto_adjust_options: Optional[Dict] = None,
         output_directory: Optional[str] = None,
         filename_variable: str = '##filename##',
         tabname_variable: str = '##tabname##',
@@ -108,6 +109,10 @@ class JobManager:
         # Add Excel print settings if provided
         if excel_print_settings:
             job.excel_print_settings = excel_print_settings
+        
+        # Add Excel auto-adjust options if provided
+        if excel_auto_adjust_options:
+            job.excel_auto_adjust_options = excel_auto_adjust_options
         
         # Store custom output directory
         if output_directory:
@@ -272,7 +277,8 @@ class JobManager:
         if not job:
             raise ValueError(f"Job not found: {job_id}")
         
-        if job.status != JobStatus.PENDING:
+        # Allow reprocessing of failed jobs (for testing and recovery)
+        if job.status not in [JobStatus.PENDING, JobStatus.FAILED]:
             raise ValueError(f"Job {job_id} cannot be processed (status: {job.status.value})")
         
         job.update_status(JobStatus.PROCESSING)
@@ -379,7 +385,8 @@ class JobManager:
                                 template_path,
                                 row_data,
                                 str(processed_doc),
-                                sheet_name=template_sheet
+                                sheet_name=template_sheet,
+                                auto_adjust_options=job.excel_auto_adjust_options if Path(template_path).suffix.lower() == '.xlsx' else None
                             )
                             
                             if not processed_doc.exists():
@@ -404,7 +411,8 @@ class JobManager:
                             job.metadata['job_template_path'],
                             row_data,
                             str(processed_doc),
-                            sheet_name=template_sheet
+                            sheet_name=template_sheet,
+                            auto_adjust_options=job.excel_auto_adjust_options if Path(job.metadata['job_template_path']).suffix.lower() == '.xlsx' else None
                         )
                         
                         if not processed_doc.exists():
@@ -417,6 +425,31 @@ class JobManager:
                     for output_format in job.output_formats:
                         # Skip pdf_merged and excel_workbook formats in loop - will be handled after all files are processed
                         if output_format in ['pdf_merged', 'excel_workbook']:
+                            continue
+                        
+                        # Skip conversion if output format matches template extension
+                        template_ext = Path(job.metadata.get('job_template_path', '')).suffix.lower()
+                        template_format = template_ext.lstrip('.')  # Remove leading dot
+                        
+                        # Map common extensions to format names
+                        format_map = {'xlsx': 'excel', 'xls': 'excel', 'docx': 'docx', 'doc': 'docx'}
+                        normalized_template_format = format_map.get(template_format, template_format)
+                        normalized_output_format = format_map.get(output_format, output_format)
+                        
+                        if normalized_template_format == normalized_output_format:
+                            print(f"Row {idx}: Skipping conversion - output format '{output_format}' matches template format '{template_format}'")
+                            # Move files to format directory to prevent duplicates in ZIP
+                            format_dir = output_dir / output_format
+                            format_dir.mkdir(parents=True, exist_ok=True)
+                            for doc_info in processed_docs:
+                                import shutil
+                                source_path = Path(doc_info['path'])
+                                dest_file = format_dir / source_path.name
+                                # Move instead of copy to avoid duplicates
+                                shutil.move(str(source_path), str(dest_file))
+                                # Update the path in processed_docs for potential later use
+                                doc_info['path'] = dest_file
+                                job.add_output_file(str(dest_file))
                             continue
                         
                         format_dir = output_dir / output_format
@@ -1060,6 +1093,8 @@ class JobManager:
         # Sort by priority
         sorted_excels = sorted(excel_list, key=lambda x: x['priority'])
         
+        wb = None
+        source_wb = None
         try:
             wb = Workbook()
             wb.remove(wb.active)  # Remove default sheet
@@ -1101,9 +1136,9 @@ class JobManager:
                     target_sheet.row_dimensions[row].height = source_sheet.row_dimensions[row].height
                 
                 source_wb.close()
+                source_wb = None
             
             wb.save(str(output_path))
-            wb.close()
             
             print(f"Job {job.id}: Merged {len(sorted_excels)} template Excel files into {output_path.name}")
             
@@ -1111,6 +1146,19 @@ class JobManager:
             print(f"Job {job.id}: Error merging template Excel files: {str(e)}")
             import traceback
             traceback.print_exc()
+            raise
+        finally:
+            # Always close workbooks to release file handles
+            if source_wb:
+                try:
+                    source_wb.close()
+                except:
+                    pass
+            if wb:
+                try:
+                    wb.close()
+                except:
+                    pass
     
     def _merge_excel_workbook(self, output_dir: Path, job: Job):
         """
@@ -1152,65 +1200,72 @@ class JobManager:
             wb.remove(wb.active)
             
             used_tab_names = set()
+            source_wb = None
             
             # Process each Excel file
             for idx, excel_file in enumerate(excel_files):
                 print(f"Job {job.id}: Adding {excel_file.name} to workbook")
                 
-                # Load the source workbook
-                source_wb = load_workbook(excel_file)
-                
-                # Get the first (and usually only) sheet
-                source_sheet = source_wb.active
-                
-                # Determine tab name
-                tab_name = self._get_tab_name(
-                    data_records[idx] if idx < len(data_records) else {},
-                    tabname_variable,
-                    idx,
-                    used_tab_names
-                )
-                
-                # Create new sheet in target workbook
-                target_sheet = wb.create_sheet(title=tab_name)
-                
-                # Copy all cells from source to target
-                for row in source_sheet.iter_rows():
-                    for cell in row:
-                        target_cell = target_sheet.cell(
-                            row=cell.row,
-                            column=cell.column,
-                            value=cell.value
-                        )
-                        
-                        # Copy cell formatting
-                        if cell.has_style:
-                            target_cell.font = cell.font.copy()
-                            target_cell.border = cell.border.copy()
-                            target_cell.fill = cell.fill.copy()
-                            target_cell.number_format = cell.number_format
-                            target_cell.protection = cell.protection.copy()
-                            target_cell.alignment = cell.alignment.copy()
-                
-                # Copy column dimensions
-                for col in source_sheet.column_dimensions:
-                    if col in source_sheet.column_dimensions:
-                        target_sheet.column_dimensions[col].width = source_sheet.column_dimensions[col].width
-                
-                # Copy row dimensions
-                for row in source_sheet.row_dimensions:
-                    if row in source_sheet.row_dimensions:
-                        target_sheet.row_dimensions[row].height = source_sheet.row_dimensions[row].height
-                
-                # Copy merged cells
-                for merged_cell_range in source_sheet.merged_cells.ranges:
-                    target_sheet.merge_cells(str(merged_cell_range))
-                
-                source_wb.close()
+                try:
+                    # Load the source workbook
+                    source_wb = load_workbook(excel_file)
+                    
+                    # Get the first (and usually only) sheet
+                    source_sheet = source_wb.active
+                    
+                    # Determine tab name
+                    tab_name = self._get_tab_name(
+                        data_records[idx] if idx < len(data_records) else {},
+                        tabname_variable,
+                        idx,
+                        used_tab_names
+                    )
+                    
+                    # Create new sheet in target workbook
+                    target_sheet = wb.create_sheet(title=tab_name)
+                    
+                    # Copy all cells from source to target
+                    for row in source_sheet.iter_rows():
+                        for cell in row:
+                            target_cell = target_sheet.cell(
+                                row=cell.row,
+                                column=cell.column,
+                                value=cell.value
+                            )
+                            
+                            # Copy cell formatting
+                            if cell.has_style:
+                                target_cell.font = cell.font.copy()
+                                target_cell.border = cell.border.copy()
+                                target_cell.fill = cell.fill.copy()
+                                target_cell.number_format = cell.number_format
+                                target_cell.protection = cell.protection.copy()
+                                target_cell.alignment = cell.alignment.copy()
+                    
+                    # Copy column dimensions
+                    for col in source_sheet.column_dimensions:
+                        if col in source_sheet.column_dimensions:
+                            target_sheet.column_dimensions[col].width = source_sheet.column_dimensions[col].width
+                    
+                    # Copy row dimensions
+                    for row in source_sheet.row_dimensions:
+                        if row in source_sheet.row_dimensions:
+                            target_sheet.row_dimensions[row].height = source_sheet.row_dimensions[row].height
+                    
+                    # Copy merged cells
+                    for merged_cell_range in source_sheet.merged_cells.ranges:
+                        target_sheet.merge_cells(str(merged_cell_range))
+                finally:
+                    # Always close source workbook after processing
+                    if source_wb:
+                        source_wb.close()
+                        source_wb = None
             
             # Save the workbook
             wb.save(str(workbook_file))
-            wb.close()
+            
+            # Save the workbook
+            wb.save(str(workbook_file))
             
             # Verify workbook file was created
             if not workbook_file.exists():
@@ -1227,6 +1282,13 @@ class JobManager:
             import traceback
             traceback.print_exc()
             # Don't fail the entire job if merge fails
+        finally:
+            # Always close the workbook to release file handles
+            if 'wb' in locals() and wb:
+                try:
+                    wb.close()
+                except:
+                    pass
     
     def _get_tab_name(self, data_record: Dict, tabname_variable: str, index: int, used_names: set) -> str:
         """

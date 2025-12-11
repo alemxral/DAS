@@ -84,6 +84,9 @@ class Job:
         # Excel printing settings
         self.excel_print_settings: Optional[Dict] = None
         
+        # Excel auto-adjust settings
+        self.excel_auto_adjust_options: Optional[Dict] = None
+        
         # Custom output directory
         self.output_directory: Optional[str] = None
     
@@ -125,6 +128,7 @@ class Job:
             'zip_file_path': self.zip_file_path,
             'metadata': self.metadata,
             'excel_print_settings': self.excel_print_settings,
+            'excel_auto_adjust_options': self.excel_auto_adjust_options,
             'output_directory': self.output_directory
         }
     
@@ -176,6 +180,7 @@ class Job:
         job.zip_file_path = data.get('zip_file_path')
         job.metadata = data.get('metadata', {})
         job.excel_print_settings = data.get('excel_print_settings')
+        job.excel_auto_adjust_options = data.get('excel_auto_adjust_options')
         job.output_directory = data.get('output_directory')
         
         return job

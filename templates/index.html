@@ -510,6 +510,44 @@
                     </div>
                 </div>
 
+                <!-- Excel Auto-Adjust Settings (shown when Excel template) -->
+                <div id="excel-auto-adjust-settings" style="display:none;">
+                    <h4 class="text-lg font-medium text-gray-900 mb-3 mt-4">Excel Cell Auto-Adjust Settings</h4>
+                    
+                    <div class="space-y-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
+                        <p class="text-sm text-blue-800">
+                            <i class="fas fa-info-circle mr-2"></i>
+                            Auto-adjust cell heights/widths after variable substitution to prevent text overflow
+                        </p>
+                        
+                        <div class="space-y-3">
+                            <!-- Auto-adjust options -->
+                            <label class="flex items-center">
+                                <input type="checkbox" id="auto_adjust_height" class="form-checkbox h-4 w-4 text-blue-600">
+                                <span class="ml-2 text-sm font-medium">Auto-adjust Row Heights</span>
+                                <span class="ml-2 text-xs text-gray-600">(for modified cells)</span>
+                            </label>
+                            
+                            <label class="flex items-center">
+                                <input type="checkbox" id="auto_adjust_width" class="form-checkbox h-4 w-4 text-blue-600">
+                                <span class="ml-2 text-sm font-medium">Auto-adjust Column Widths</span>
+                                <span class="ml-2 text-xs text-gray-600">(based on content length)</span>
+                            </label>
+                            
+                            <!-- Specific range option -->
+                            <div class="pl-6 border-l-2 border-blue-300">
+                                <label class="block text-sm font-medium text-gray-700 mb-1">
+                                    Adjust Specific Range (optional)
+                                </label>
+                                <input type="text" id="adjust_range" placeholder="e.g., A1:E10" class="block w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
+                                <p class="text-xs text-gray-500 mt-1">
+                                    Leave empty to auto-adjust only modified cells, or specify a range like "A1:E10" to adjust that range regardless of modifications
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Actions -->
                 <div class="flex justify-end space-x-3 pt-4 border-t">
                     <button type="button" onclick="closeCreateJobModal()" class="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">

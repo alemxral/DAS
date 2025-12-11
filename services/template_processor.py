@@ -17,6 +17,7 @@ except ImportError:
 try:
     import openpyxl
     from openpyxl.styles import Font, PatternFill
+    from openpyxl.utils import get_column_letter, range_boundaries
 except ImportError:
     openpyxl = None
 
@@ -143,7 +144,7 @@ class TemplateProcessor:
         
         return sorted(list(variables))
     
-    def process_template(self, template_path: str, data: Dict, output_path: str, sheet_name: str = None) -> str:
+    def process_template(self, template_path: str, data: Dict, output_path: str, sheet_name: str = None, auto_adjust_options: Dict = None) -> str:
         """
         Process a template with data substitution.
         
@@ -152,6 +153,7 @@ class TemplateProcessor:
             data: Dictionary mapping variable names to values
             output_path: Path for output file
             sheet_name: Optional sheet name for Excel templates
+            auto_adjust_options: Optional dict with Excel auto-adjust settings
             
         Returns:
             Path to the generated file
@@ -161,7 +163,7 @@ class TemplateProcessor:
         if ext == '.docx':
             return self._process_docx_template(template_path, data, output_path)
         elif ext == '.xlsx':
-            return self._process_xlsx_template(template_path, data, output_path, sheet_name)
+            return self._process_xlsx_template(template_path, data, output_path, sheet_name, auto_adjust_options)
         elif ext == '.msg':
             return self._process_msg_template(template_path, data, output_path)
         else:
@@ -214,7 +216,7 @@ class TemplateProcessor:
         doc.save(output_path)
         return output_path
     
-    def _process_xlsx_template(self, template_path: str, data: Dict, output_path: str, sheet_name: str = None) -> str:
+    def _process_xlsx_template(self, template_path: str, data: Dict, output_path: str, sheet_name: str = None, auto_adjust_options: Dict = None) -> str:
         """Process Excel template with caching for performance."""
         if openpyxl is None:
             raise ImportError("openpyxl is required for Excel templates")
@@ -224,37 +226,119 @@ class TemplateProcessor:
             print(f"[TemplateProcessor] Caching Excel template: {Path(template_path).name}")
             self._xlsx_cache[template_path] = openpyxl.load_workbook(template_path)
         
-        # Deep copy cached workbook
-        from copy import deepcopy
-        wb = deepcopy(self._xlsx_cache[template_path])
+        # Load a fresh copy from the cached path (avoid deepcopy issues with openpyxl)
+        wb = openpyxl.load_workbook(template_path)
         
-        # Determine which sheets to process
-        sheets_to_process = []
-        if sheet_name:
-            # Process only the specified sheet
-            if sheet_name in wb.sheetnames:
-                sheets_to_process = [wb[sheet_name]]
+        try:
+            # Track modified cells for auto-adjust
+            modified_cells = set()
+            
+            # Determine which sheets to process
+            sheets_to_process = []
+            if sheet_name:
+                # Process only the specified sheet
+                if sheet_name in wb.sheetnames:
+                    sheets_to_process = [wb[sheet_name]]
+                else:
+                    raise ValueError(f"Sheet '{sheet_name}' not found in template")
             else:
-                raise ValueError(f"Sheet '{sheet_name}' not found in template")
-        else:
-            # Process all sheets
-            sheets_to_process = wb.worksheets
+                # Process all sheets
+                sheets_to_process = wb.worksheets
+            
+            for sheet in sheets_to_process:
+                for row in sheet.iter_rows():
+                    for cell in row:
+                        if cell.value and isinstance(cell.value, str):
+                            new_value = cell.value
+                            for var_name, value in data.items():
+                                placeholder = f"##{var_name}##"
+                                new_value = new_value.replace(placeholder, str(value))
+                            if new_value != cell.value:
+                                cell.value = new_value
+                                # Track modified cell (sheet_title, row, col) tuple
+                                modified_cells.add((sheet.title, cell.row, cell.column))
+            
+            # Apply auto-adjust if options provided
+            if auto_adjust_options:
+                self._apply_excel_auto_adjust(wb, sheets_to_process, modified_cells, auto_adjust_options)
+            
+            # Save the workbook
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            wb.save(output_path)
+            return output_path
+        finally:
+            # Always close the workbook to release file handle
+            wb.close()
+    
+    def _apply_excel_auto_adjust(self, wb, sheets: list, modified_cells: set, options: Dict):
+        """
+        Apply auto-adjust to Excel cells based on options.
         
-        for sheet in sheets_to_process:
-            for row in sheet.iter_rows():
-                for cell in row:
-                    if cell.value and isinstance(cell.value, str):
-                        new_value = cell.value
-                        for var_name, value in data.items():
-                            placeholder = f"##{var_name}##"
-                            new_value = new_value.replace(placeholder, str(value))
-                        if new_value != cell.value:
-                            cell.value = new_value
+        Args:
+            wb: Workbook instance
+            sheets: List of sheets to process
+            modified_cells: Set of (sheet_title, row, col) tuples for modified cells
+            options: Dict with auto_adjust_height, auto_adjust_width, adjust_range
+        """
+        auto_adjust_height = options.get('auto_adjust_height', False)
+        auto_adjust_width = options.get('auto_adjust_width', False)
+        adjust_range = options.get('adjust_range', None)
         
-        # Save the workbook
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        wb.save(output_path)
-        return output_path
+        for sheet in sheets:
+            # Get cells to adjust
+            cells_to_adjust = set()
+            
+            if adjust_range:
+                # Parse range like "A1:E10"
+                try:
+                    min_col, min_row, max_col, max_row = range_boundaries(adjust_range)
+                    for row in range(min_row, max_row + 1):
+                        for col in range(min_col, max_col + 1):
+                            cells_to_adjust.add((row, col))
+                    print(f"[TemplateProcessor] Auto-adjusting range {adjust_range} in sheet '{sheet.title}'")
+                except Exception as e:
+                    print(f"[TemplateProcessor] Warning: Invalid adjust_range '{adjust_range}': {e}")
+                    continue
+            else:
+                # Use modified cells for this sheet
+                for sheet_title, row, col in modified_cells:
+                    if sheet_title == sheet.title:
+                        cells_to_adjust.add((row, col))
+                if cells_to_adjust:
+                    print(f"[TemplateProcessor] Auto-adjusting {len(cells_to_adjust)} modified cells in sheet '{sheet.title}'")
+            
+            if not cells_to_adjust:
+                continue
+            
+            # Auto-adjust heights
+            if auto_adjust_height:
+                rows_to_adjust = set(row for row, col in cells_to_adjust)
+                for row_num in rows_to_adjust:
+                    # Ensure RowDimension exists before accessing
+                    if row_num not in sheet.row_dimensions:
+                        from openpyxl.worksheet.dimensions import RowDimension
+                        sheet.row_dimensions[row_num] = RowDimension(sheet, index=row_num)
+                    sheet.row_dimensions[row_num].height = None  # Auto height
+            
+            # Auto-adjust widths
+            if auto_adjust_width:
+                cols_to_adjust = set(col for row, col in cells_to_adjust)
+                for col_num in cols_to_adjust:
+                    # Calculate optimal width based on cell content
+                    max_length = 0
+                    column_letter = get_column_letter(col_num)
+                    
+                    for row_num, cell_col in cells_to_adjust:
+                        if cell_col == col_num:
+                            cell = sheet.cell(row=row_num, column=col_num)
+                            if cell.value:
+                                cell_length = len(str(cell.value))
+                                max_length = max(max_length, cell_length)
+                    
+                    # Set column width with some padding (Excel uses character units)
+                    adjusted_width = min(max_length + 2, 50)
+                    if adjusted_width > 0:
+                        sheet.column_dimensions[column_letter].width = adjusted_width
     
     def _process_msg_template(self, template_path: str, data: Dict, output_path: str) -> str:
         """Process .msg template."""
