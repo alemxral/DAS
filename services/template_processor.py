@@ -160,6 +160,14 @@ class TemplateProcessor:
         """
         ext = Path(template_path).suffix.lower()
         
+        # Debug logging
+        print(f"[TemplateProcessor] Processing template: {Path(template_path).name}")
+        print(f"[TemplateProcessor] Data keys: {list(data.keys())}")
+        print(f"[TemplateProcessor] Data values count: {len(data)}")
+        
+        if not data:
+            print("[TemplateProcessor] WARNING: Empty data dictionary provided!")
+        
         if ext == '.docx':
             return self._process_docx_template(template_path, data, output_path)
         elif ext == '.xlsx':
@@ -246,17 +254,25 @@ class TemplateProcessor:
                 sheets_to_process = wb.worksheets
             
             for sheet in sheets_to_process:
+                replacements_made = 0
                 for row in sheet.iter_rows():
                     for cell in row:
                         if cell.value and isinstance(cell.value, str):
+                            original_value = cell.value
                             new_value = cell.value
                             for var_name, value in data.items():
                                 placeholder = f"##{var_name}##"
-                                new_value = new_value.replace(placeholder, str(value))
+                                if placeholder in new_value:
+                                    new_value = new_value.replace(placeholder, str(value))
+                                    replacements_made += 1
                             if new_value != cell.value:
                                 cell.value = new_value
                                 # Track modified cell (sheet_title, row, col) tuple
                                 modified_cells.add((sheet.title, cell.row, cell.column))
+                
+                print(f"[TemplateProcessor] Sheet '{sheet.title}': Made {replacements_made} replacements")
+            
+            print(f"[TemplateProcessor] Total modified cells: {len(modified_cells)}")
             
             # Apply auto-adjust if options provided
             if auto_adjust_options:

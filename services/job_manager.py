@@ -228,12 +228,15 @@ class JobManager:
         
         job = self.jobs[job_id]
         
+        print(f"[Delete Job] ID: {job_id}, Status: {job.status.value}, Force: {force}")
+        
         # Check if job is currently processing
         if job.status == JobStatus.PROCESSING and not force:
             return {'success': False, 'error': 'Cannot delete job while it is processing. Please wait for completion or use force delete.'}
         
         # If processing and force=True, try to cancel first
         if job.status == JobStatus.PROCESSING and force:
+            print(f"[Delete Job] Force deleting processing job {job_id}")
             if hasattr(job, '_cancel_event'):
                 job._cancel_event.set()
                 # Wait up to 5 seconds for cancellation
@@ -243,18 +246,38 @@ class JobManager:
         # Delete job directory with retry logic
         job_dir = self.get_job_dir(job_id)
         if job_dir.exists():
-            max_retries = 3
+            # Force garbage collection to release file handles
+            import gc
+            import time
+            gc.collect()
+            time.sleep(0.2)  # Brief pause to allow handles to release
+            
+            print(f"[Delete Job] Attempting to delete directory: {job_dir}")
+            
+            max_retries = 5  # Increased retries for PyWebView
             for attempt in range(max_retries):
                 try:
                     shutil.rmtree(job_dir)
+                    print(f"[Delete Job] Successfully deleted directory on attempt {attempt + 1}")
                     break
-                except PermissionError as e:
+                except (PermissionError, OSError) as e:
                     if attempt < max_retries - 1:
-                        import time
-                        time.sleep(1)  # Wait 1 second before retry
+                        print(f"[Delete Job] Attempt {attempt + 1} failed: {str(e)}, retrying...")
+                        # Force garbage collection between retries
+                        gc.collect()
+                        # Progressive backoff: 0.3s, 0.6s, 0.9s, 1.2s
+                        time.sleep(0.3 * (attempt + 1))
                     else:
-                        return {'success': False, 'error': f'Cannot delete job files: {str(e)}. Files may be in use.'}
+                        # Last attempt: try to provide helpful error message
+                        print(f"[Delete Job] All {max_retries} attempts failed")
+                        error_msg = f'Cannot delete job files after {max_retries} attempts. '
+                        if isinstance(e, PermissionError):
+                            error_msg += 'Files may be in use by another process. Please close any open documents and try again.'
+                        else:
+                            error_msg += f'Error: {str(e)}'
+                        return {'success': False, 'error': error_msg}
                 except Exception as e:
+                    print(f"[Delete Job] Unexpected error: {str(e)}")
                     return {'success': False, 'error': f'Error deleting job: {str(e)}'}
         
         # Remove from memory
@@ -314,13 +337,46 @@ class JobManager:
         """
         import time
         try:
+            # Validate and log paths for debugging (especially in frozen exe)
+            data_path = job.metadata.get('job_data_path')
+            if not data_path:
+                raise RuntimeError("job_data_path not found in job metadata")
+            
+            # Ensure path is a Path object and convert to absolute if needed
+            data_path = Path(data_path)
+            if not data_path.is_absolute():
+                # Try to resolve relative to job directory
+                job_dir = self.get_job_dir(job.id)
+                data_path = job_dir / data_path
+            
+            # Convert back to string for compatibility
+            data_path_str = str(data_path.absolute())
+            
+            print(f"[JobManager] Data path from metadata: {job.metadata.get('job_data_path')}")
+            print(f"[JobManager] Data path resolved: {data_path_str}")
+            print(f"[JobManager] Data path exists: {data_path.exists()}")
+            
+            if not data_path.exists():
+                # Try to find the file in the job directory
+                job_dir = self.get_job_dir(job.id)
+                print(f"[JobManager] Job directory: {job_dir}")
+                print(f"[JobManager] Job directory exists: {job_dir.exists()}")
+                if job_dir.exists():
+                    print(f"[JobManager] Job directory contents: {list(job_dir.iterdir())}")
+                raise FileNotFoundError(f"Data file not found: {data_path_str}")
+            
             # Parse data file with optional sheet name
             data_sheet = job.metadata.get('data_sheet', None)
+            print(f"[JobManager] Parsing data file with sheet: {data_sheet}")
+            
             data_result = self.document_parser.parse_excel_data(
-                job.metadata['job_data_path'],
+                data_path_str,
                 sheet_name=data_sheet
             )
             job.total_records = data_result['total_rows']
+            
+            print(f"[JobManager] Parsed {job.total_records} total records")
+            print(f"[JobManager] Data rows available: {len(data_result['data'])}")
             
             # Create output directory
             output_dir = self.get_job_dir(job.id) / "outputs"
@@ -340,6 +396,11 @@ class JobManager:
                     job.update_status(JobStatus.CANCELLED, error_message="Job cancelled by user")
                     self.save_job_metadata(job)
                     return job
+                
+                # Debug logging for first row
+                if idx == 1:
+                    print(f"[JobManager] First row data keys: {list(row_data.keys())}")
+                    print(f"[JobManager] First row data sample: {dict(list(row_data.items())[:3])}")
                 
                 try:
                     # Determine output filename
@@ -373,20 +434,32 @@ class JobManager:
                         
                         for tmpl_idx, template_config in enumerate(templates_list):
                             template_path = template_config['path']
+                            
+                            # Ensure path is absolute
+                            template_path_obj = Path(template_path)
+                            if not template_path_obj.is_absolute():
+                                job_dir = self.get_job_dir(job.id)
+                                template_path_obj = job_dir / template_path_obj
+                            
+                            template_path_str = str(template_path_obj.absolute())
+                            
+                            if not template_path_obj.exists():
+                                raise FileNotFoundError(f"Template file not found: {template_path_str}")
+                            
                             template_sheet = template_config.get('sheet', None)
-                            template_ext = Path(template_path).suffix
+                            template_ext = template_path_obj.suffix
                             
                             # Create output with template index to keep them separate
                             processed_doc = output_dir / f"{base_filename}_tmpl{tmpl_idx}{template_ext}"
                             
-                            print(f"Row {idx}, Template {tmpl_idx+1}/{len(templates_list)}: Processing {Path(template_path).name}...")
+                            print(f"Row {idx}, Template {tmpl_idx+1}/{len(templates_list)}: Processing {template_path_obj.name}...")
                             
                             self.template_processor.process_template(
-                                template_path,
+                                template_path_str,
                                 row_data,
                                 str(processed_doc),
                                 sheet_name=template_sheet,
-                                auto_adjust_options=job.excel_auto_adjust_options if Path(template_path).suffix.lower() == '.xlsx' else None
+                                auto_adjust_options=job.excel_auto_adjust_options if template_path_obj.suffix.lower() == '.xlsx' else None
                             )
                             
                             if not processed_doc.exists():
@@ -405,14 +478,34 @@ class JobManager:
                         processed_doc = output_dir / f"{base_filename}{template_ext}"
                         print(f"Processing row {idx}: Generating {base_filename}{template_ext}...")
                         
+                        template_path = job.metadata.get('job_template_path')
+                        if not template_path:
+                            raise RuntimeError("job_template_path not found in job metadata")
+                        
+                        # Ensure path is a Path object and convert to absolute if needed
+                        template_path_obj = Path(template_path)
+                        if not template_path_obj.is_absolute():
+                            # Try to resolve relative to job directory
+                            job_dir = self.get_job_dir(job.id)
+                            template_path_obj = job_dir / template_path_obj
+                        
+                        template_path_str = str(template_path_obj.absolute())
+                        
+                        print(f"[JobManager] Template path from metadata: {template_path}")
+                        print(f"[JobManager] Template path resolved: {template_path_str}")
+                        print(f"[JobManager] Template exists: {template_path_obj.exists()}")
+                        
+                        if not template_path_obj.exists():
+                            raise FileNotFoundError(f"Template file not found: {template_path_str}")
+                        
                         template_sheet = job.metadata.get('template_sheet', None)
                         
                         self.template_processor.process_template(
-                            job.metadata['job_template_path'],
+                            template_path_str,
                             row_data,
                             str(processed_doc),
                             sheet_name=template_sheet,
-                            auto_adjust_options=job.excel_auto_adjust_options if Path(job.metadata['job_template_path']).suffix.lower() == '.xlsx' else None
+                            auto_adjust_options=job.excel_auto_adjust_options if template_path_obj.suffix.lower() == '.xlsx' else None
                         )
                         
                         if not processed_doc.exists():

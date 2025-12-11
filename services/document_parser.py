@@ -188,6 +188,8 @@ class DocumentParser:
             raw_headers = []
             variables = []
             
+            print(f"[DocumentParser] Parsing Excel data from sheet: {sheet_name}")
+            
             for cell in header_row:
                 header_value = cell.value if cell.value else ""
                 raw_headers.append(str(header_value))
@@ -196,11 +198,16 @@ class DocumentParser:
                     extracted = self.extract_variables(str(header_value))
                     if extracted:
                         variables.append(extracted[0])
+                        print(f"[DocumentParser] Found variable: {extracted[0]} from header: {header_value}")
                     else:
                         # If no ##variable## format, use the raw value
                         variables.append(str(header_value))
+                        print(f"[DocumentParser] Using raw header as variable: {header_value}")
                 else:
                     variables.append(f"column_{len(variables)}")
+                    print(f"[DocumentParser] Empty header, using: column_{len(variables)}")
+            
+            print(f"[DocumentParser] Total variables extracted: {len(variables)}")
             
             # Parse data rows (skip first row which is header)
             data_rows = []

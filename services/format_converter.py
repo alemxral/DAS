@@ -159,34 +159,23 @@ class FormatConverter:
                     raise ImportError("PDF conversion requires MS Office or LibreOffice")
             
             elif input_ext == '.xlsx':
-                # Convert Excel to PDF - check if complex print settings needed
-                use_reportlab = not print_settings or not self._has_complex_print_settings(print_settings)
+                # Convert Excel to PDF
+                # Priority: MS Excel COM (best formatting) > LibreOffice > ReportLab (basic)
                 
-                if use_reportlab and REPORTLAB_AVAILABLE:
-                    # ReportLab: Very fast (0.5-1s), basic formatting
-                    print(f"[FormatConverter] Using ReportLab for Excel→PDF")
-                    self._xlsx_to_pdf_reportlab(input_path, output_path)
-                elif LIBREOFFICE_AVAILABLE:
-                    try:
-                        # LibreOffice: Fast, portable
-                        print(f"[FormatConverter] Using LibreOffice for Excel→PDF")
-                        self._libreoffice_to_pdf(input_path, output_path)
-                    except Exception as e:
-                        print(f"[FormatConverter] LibreOffice failed: {e}")
-                        if WIN32_AVAILABLE:
-                            print(f"[FormatConverter] Falling back to MS Excel COM")
-                            self._xlsx_to_pdf_com(input_path, output_path, print_settings)
-                        else:
-                            raise
-                elif WIN32_AVAILABLE:
-                    # COM: Supports complex print settings, reliable
-                    print(f"[FormatConverter] Using MS Excel COM for Excel→PDF")
+                if WIN32_AVAILABLE:
+                    # MS Excel COM: Best formatting preservation, supports complex print settings
+                    print(f"[FormatConverter] Using MS Excel COM for Excel→PDF (best quality)")
                     self._xlsx_to_pdf_com(input_path, output_path, print_settings)
-                    # LibreOffice: Fast (2-3s), good formatting
+                elif LIBREOFFICE_AVAILABLE:
+                    # LibreOffice: Fast, portable, decent formatting
                     print(f"[FormatConverter] Using LibreOffice for Excel→PDF")
                     self._libreoffice_to_pdf(input_path, output_path)
+                elif REPORTLAB_AVAILABLE:
+                    # ReportLab: Very fast, basic formatting only
+                    print(f"[FormatConverter] Using ReportLab for Excel→PDF (basic formatting)")
+                    self._xlsx_to_pdf_reportlab(input_path, output_path)
                 else:
-                    raise ImportError("Excel PDF conversion requires MS Office, ReportLab, or LibreOffice")
+                    raise ImportError("Excel PDF conversion requires MS Office, LibreOffice, or ReportLab")
             
             elif input_ext == '.msg':
                 # Convert MSG to PDF - requires Outlook
@@ -243,6 +232,28 @@ class FormatConverter:
         
         try:
             # LibreOffice command: soffice --headless --convert-to pdf --outdir <dir> <file>
+            # For Excel files, we can add filter options to preserve formatting better
+            input_ext = Path(abs_input).suffix.lower()
+            
+            # Build filter options for Excel files
+            filter_opts = []
+            if input_ext in ['.xlsx', '.xls']:
+                # Excel-specific PDF export options for LibreOffice Calc
+                # UseISOPaperFormatting=false preserves Excel page setup
+                # EmbedStandardFonts=true ensures fonts display correctly
+                # ExportFormFields=false prevents form field issues
+                # FormsType=0 means no form export
+                filter_opts = [
+                    'PageRange=All',
+                    'MaxImageResolution=300',
+                    'Quality=90',
+                    'ReduceImageResolution=false',
+                    'UseISOPaperFormatting=false',
+                    'EmbedStandardFonts=true',
+                    'ExportFormFields=false',
+                    'FormsType=0'
+                ]
+            
             cmd = [
                 soffice_cmd,
                 '--headless',
@@ -253,10 +264,17 @@ class FormatConverter:
                 '--nolockcheck',
                 '--nologo',
                 '--norestore',
-                '--convert-to', 'pdf',
-                '--outdir', output_dir,
-                abs_input
+                '--convert-to'
             ]
+            
+            # Add filter options if we have them
+            if filter_opts:
+                filter_str = ':'.join(filter_opts)
+                cmd.append(f'pdf:calc_pdf_Export:{filter_str}')
+            else:
+                cmd.append('pdf')
+            
+            cmd.extend(['--outdir', output_dir, abs_input])
             
             # Hide console window on Windows
             startupinfo = None
