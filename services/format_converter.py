@@ -9,6 +9,7 @@ import subprocess
 import time
 from pathlib import Path
 from typing import List, Dict, Optional
+from io import StringIO
 from utils.file_handlers import open_workbook_safe
 
 try:
@@ -186,19 +187,11 @@ class FormatConverter:
                         "Please ensure MS Excel is installed."
                     )
                 
-                try:
-                    # MS Excel COM: REQUIRED for proper Excel PDF formatting
-                    print(f"[FormatConverter] Using MS Excel COM for Excel→PDF (REQUIRED for quality)")
-                    self._xlsx_to_pdf_com(input_path, output_path, print_settings)
-                except Exception as com_error:
-                    # If COM fails, this is a CRITICAL error - do NOT fall back to LibreOffice
-                    error_msg = (
-                        f"Excel COM PDF conversion FAILED: {str(com_error)}\n"
-                        f"Excel PDFs require MS Excel COM for proper formatting.\n"
-                        f"LibreOffice/ReportLab produce poor quality Excel PDFs and are NOT used as fallback."
-                    )
-                    print(f"[FormatConverter] ERROR: {error_msg}")
-                    raise RuntimeError(error_msg)
+                # MS Excel COM: REQUIRED for proper Excel PDF formatting
+                print(f"[FormatConverter] Using MS Excel COM for Excel→PDF (REQUIRED for quality)")
+                self._xlsx_to_pdf_com(input_path, output_path, print_settings)
+                # Note: If COM fails, _xlsx_to_pdf_com will raise RuntimeError with full debug log
+                # We let it propagate unchanged to preserve all debugging information
             
             elif input_ext == '.msg':
                 # Convert MSG to PDF - requires Outlook
@@ -407,61 +400,131 @@ class FormatConverter:
             raise RuntimeError(f"PDF file was not created by Word: {output_path}")
     
     def _xlsx_to_pdf_com(self, input_path: str, output_path: str, print_settings: Optional[Dict] = None):
-        """Convert Excel to PDF using COM automation."""
+        """Convert Excel to PDF using COM automation with 6 fallback methods and extensive debugging."""
+        # Capture all debug output for UI display and log file
+        import sys
+        from datetime import datetime
+        from config.config import Config
+        
+        debug_log = StringIO()
+        original_stdout = sys.stdout
+        
+        # Create log file in AppData/logs
+        log_filename = f"excel_conversion_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+        log_path = Path(Config.LOGS_DIR) / log_filename
+        
+        class TeeOutput:
+            """Write to console, string buffer, AND log file"""
+            def __init__(self, *outputs):
+                self.outputs = outputs
+                self.log_file = open(log_path, 'w', encoding='utf-8')
+            def write(self, data):
+                for output in self.outputs:
+                    output.write(data)
+                # Also write to log file
+                self.log_file.write(data)
+                self.log_file.flush()
+            def flush(self):
+                for output in self.outputs:
+                    output.flush()
+                self.log_file.flush()
+            def close(self):
+                self.log_file.close()
+        
+        # Redirect stdout to capture all print statements
+        tee = TeeOutput(original_stdout, debug_log)
+        sys.stdout = tee
+        
+        try:
+            print(f"[Excel COM] Log file: {log_path}")
+            self._xlsx_to_pdf_com_inner(input_path, output_path, print_settings, debug_log, log_path)
+        finally:
+            # Always restore stdout and close log file
+            sys.stdout = original_stdout
+            tee.close()
+    
+    def _xlsx_to_pdf_com_inner(self, input_path: str, output_path: str, print_settings: Optional[Dict], debug_log, log_path):
+        """Inner implementation of Excel to PDF conversion."""
+        
+        print(f"\n{'='*80}")
+        print(f"[Excel COM] STARTING EXCEL TO PDF CONVERSION")
+        print(f"{'='*80}")
+        
         if not os.path.exists(input_path):
             raise FileNotFoundError(f"Input file not found: {input_path}")
         
-        print(f"[Excel COM] Starting Excel to PDF conversion")
-        print(f"[Excel COM] Input: {input_path}")
-        print(f"[Excel COM] Output: {output_path}")
+        print(f"[Excel COM] Input file: {input_path}")
+        print(f"[Excel COM] Input exists: {os.path.exists(input_path)}")
+        print(f"[Excel COM] Input size: {os.path.getsize(input_path):,} bytes")
+        print(f"[Excel COM] Output path: {output_path}")
+        print(f"[Excel COM] Output is absolute: {os.path.isabs(output_path)}")
+        print(f"[Excel COM] Output dir: {os.path.dirname(output_path)}")
+        print(f"[Excel COM] Output dir exists: {os.path.exists(os.path.dirname(output_path))}")
+        print(f"[Excel COM] Print settings: {print_settings is not None}")
         
         # Initialize COM for this thread
         try:
             pythoncom.CoInitialize()
-            print(f"[Excel COM] COM initialized")
+            print(f"[Excel COM] [OK] COM initialized successfully")
         except Exception as e:
+            print(f"[Excel COM] [X] FATAL: Failed to initialize COM: {str(e)}")
             raise RuntimeError(f"Failed to initialize COM: {str(e)}")
         
         try:
             try:
                 excel = win32com.client.Dispatch("Excel.Application")
-                print(f"[Excel COM] Excel.Application dispatched")
+                print(f"[Excel COM] [OK] Excel.Application dispatched successfully")
             except Exception as e:
+                print(f"[Excel COM] [X] FATAL: Failed to create Excel.Application: {str(e)}")
+                print(f"[Excel COM] Is MS Excel installed? Check COM registration.")
                 raise RuntimeError(f"Failed to create Excel.Application: {str(e)}")
             
             excel.Visible = False
             excel.DisplayAlerts = False
-            print(f"[Excel COM] Excel configured (Visible=False, DisplayAlerts=False)")
+            print(f"[Excel COM] [OK] Excel configured (Visible=False, DisplayAlerts=False)")
             
             try:
                 abs_input = os.path.abspath(input_path)
                 abs_output = os.path.abspath(output_path)
                 
-                print(f"[Excel COM] Opening workbook: {abs_input}")
-                wb = excel.Workbooks.Open(abs_input, ReadOnly=True, UpdateLinks=False)
-                print(f"[Excel COM] Workbook opened successfully")
+                print(f"[Excel COM] Absolute input: {abs_input}")
+                print(f"[Excel COM] Absolute output: {abs_output}")
+                
+                print(f"[Excel COM] Opening workbook...")
+                try:
+                    wb = excel.Workbooks.Open(abs_input, ReadOnly=True, UpdateLinks=False)
+                    print(f"[Excel COM] [OK] Workbook opened successfully")
+                    print(f"[Excel COM] Workbook name: {wb.Name}")
+                    print(f"[Excel COM] Worksheets count: {wb.Worksheets.Count}")
+                except Exception as e:
+                    print(f"[Excel COM] [X] FATAL: Failed to open workbook: {str(e)}")
+                    raise RuntimeError(f"Failed to open workbook: {str(e)}")
                 
                 # Apply print settings if provided
                 if print_settings:
-                    print(f"[Excel COM] Applying print settings...")
-                    for sheet in wb.Worksheets:
-                        # Page setup
-                        ps = sheet.PageSetup
-                        
-                        # Orientation: 1 = Portrait, 2 = Landscape
-                        if print_settings.get('orientation') == 'landscape':
-                            ps.Orientation = 2
-                        else:
-                            ps.Orientation = 1
-                        
-                        # Paper size (e.g., 1 = Letter, 9 = A4)
-                        paper_sizes = {
-                            'letter': 1, 'a4': 9, 'a3': 8, 'legal': 5,
-                            'tabloid': 3, 'a5': 11
-                        }
-                        paper = print_settings.get('paper_size', 'a4').lower()
-                        if paper in paper_sizes:
-                            ps.PaperSize = paper_sizes[paper]
+                    print(f"[Excel COM] Applying print settings: {print_settings}")
+                    try:
+                        for sheet_idx, sheet in enumerate(wb.Worksheets, 1):
+                            print(f"[Excel COM] Configuring sheet {sheet_idx}: {sheet.Name}")
+                            ps = sheet.PageSetup
+                            
+                            # Orientation: 1 = Portrait, 2 = Landscape
+                            if print_settings.get('orientation') == 'landscape':
+                                ps.Orientation = 2
+                                print(f"[Excel COM]   - Orientation: Landscape")
+                            else:
+                                ps.Orientation = 1
+                                print(f"[Excel COM]   - Orientation: Portrait")
+                            
+                            # Paper size (e.g., 1 = Letter, 9 = A4)
+                            paper_sizes = {
+                                'letter': 1, 'a4': 9, 'a3': 8, 'legal': 5,
+                                'tabloid': 3, 'a5': 11
+                            }
+                            paper = print_settings.get('paper_size', 'a4').lower()
+                            if paper in paper_sizes:
+                                ps.PaperSize = paper_sizes[paper]
+                                print(f"[Excel COM]   - Paper size: {paper}")
                         
                         # Margins (in inches)
                         if 'margins' in print_settings:
@@ -470,6 +533,7 @@ class FormatConverter:
                             ps.RightMargin = excel.InchesToPoints(margins.get('right', 0.75))
                             ps.TopMargin = excel.InchesToPoints(margins.get('top', 1.0))
                             ps.BottomMargin = excel.InchesToPoints(margins.get('bottom', 1.0))
+                            print(f"[Excel COM]   - Margins applied")
                         
                         # Scaling
                         if 'scaling' in print_settings:
@@ -481,41 +545,54 @@ class FormatConverter:
                                 ps.Zoom = 100
                                 ps.FitToPagesWide = False
                                 ps.FitToPagesTall = False
+                                print(f"[Excel COM]   - Scaling: None (100%)")
                             elif scaling_type == 'percent':
                                 # Scale to percentage
                                 ps.Zoom = scaling.get('value', 100)
                                 ps.FitToPagesWide = False
                                 ps.FitToPagesTall = False
+                                print(f"[Excel COM]   - Scaling: {ps.Zoom}%")
                             elif scaling_type == 'fit_to':
                                 # Fit to specific pages wide/tall
                                 ps.Zoom = False
                                 ps.FitToPagesWide = scaling.get('width', 1)
                                 ps.FitToPagesTall = scaling.get('height', 1)
+                                print(f"[Excel COM]   - Scaling: Fit to {ps.FitToPagesWide}x{ps.FitToPagesTall} pages")
                             elif scaling_type == 'fit_sheet_on_one_page':
                                 # Fit entire sheet on one page
                                 ps.Zoom = False
                                 ps.FitToPagesWide = 1
                                 ps.FitToPagesTall = 1
+                                print(f"[Excel COM]   - Scaling: Fit sheet on one page")
                             elif scaling_type == 'fit_all_columns_on_one_page':
                                 # Fit all columns on one page width
                                 ps.Zoom = False
                                 ps.FitToPagesWide = 1
                                 ps.FitToPagesTall = False
+                                print(f"[Excel COM]   - Scaling: Fit all columns")
                             elif scaling_type == 'fit_all_rows_on_one_page':
                                 # Fit all rows on one page height
                                 ps.Zoom = False
                                 ps.FitToPagesWide = False
                                 ps.FitToPagesTall = 1
+                                print(f"[Excel COM]   - Scaling: Fit all rows")
                         
                         # Print quality
                         if 'print_quality' in print_settings:
                             ps.PrintQuality = print_settings['print_quality']
+                            print(f"[Excel COM]   - Print quality: {ps.PrintQuality}")
                         
                         # Center on page
                         if print_settings.get('center_horizontally'):
                             ps.CenterHorizontally = True
+                            print(f"[Excel COM]   - Center horizontally: Yes")
                         if print_settings.get('center_vertically'):
                             ps.CenterVertically = True
+                            print(f"[Excel COM]   - Center vertically: Yes")
+                        
+                        print(f"[Excel COM] [OK] Print settings applied to all sheets")
+                    except Exception as ps_error:
+                        print(f"[Excel COM] [WARN] Warning: Failed to apply some print settings: {ps_error}")
                 
                 # Export to PDF
                 # IgnorePrintAreas parameter (0 = False, 1 = True)
@@ -529,6 +606,7 @@ class FormatConverter:
                 if print_settings and 'page_range' in print_settings:
                     from_page = print_settings['page_range'].get('from', 1)
                     to_page = print_settings['page_range'].get('to', 0)
+                    print(f"[Excel COM] Page range: {from_page} to {to_page if to_page > 0 else 'end'}")
             
                 print(f"[Excel COM] Target PDF: {abs_output}")
                 
@@ -536,10 +614,14 @@ class FormatConverter:
                 output_dir_path = os.path.dirname(abs_output)
                 if not os.path.exists(output_dir_path):
                     os.makedirs(output_dir_path, exist_ok=True)
-                    print(f"[Excel COM] Created output directory: {output_dir_path}")
+                    print(f"[Excel COM] [OK] Created output directory: {output_dir_path}")
+                else:
+                    print(f"[Excel COM] [OK] Output directory exists: {output_dir_path}")
                 
                 # List directory BEFORE conversion
-                print(f"[Excel COM] ===== PRE-CONVERSION STATE =====")
+                print(f"\n[Excel COM] {'='*60}")
+                print(f"[Excel COM] PRE-CONVERSION STATE")
+                print(f"[Excel COM] {'='*60}")
                 try:
                     files_before = list(Path(output_dir_path).iterdir())
                     print(f"[Excel COM] Files in output dir: {len(files_before)}")
@@ -552,18 +634,24 @@ class FormatConverter:
                 # Track conversion success
                 export_success = False
                 method_used = None
+                last_error = None
+                print(f"[Excel COM] Starting 6-method conversion chain...")
                 
                 # ============================================================
                 # METHOD 1: ExportAsFixedFormat - Standard Quality
                 # ============================================================
                 if not export_success:
                     try:
-                        print(f"\n[Excel COM] === METHOD 1: ExportAsFixedFormat (Standard) ===")
+                        print(f"\n[Excel COM] ╔══════════════════════════════════════════════════════════╗")
+                        print(f"[Excel COM] ║ METHOD 1: ExportAsFixedFormat (Standard Quality)        ║")
+                        print(f"[Excel COM] ╚══════════════════════════════════════════════════════════╝")
                         
                         # Remove any existing file
                         if os.path.exists(abs_output):
                             os.remove(abs_output)
+                            print(f"[Excel COM] Removed existing file")
                         
+                        print(f"[Excel COM] Calling ExportAsFixedFormat...")
                         if from_page == 1 and to_page == 0:
                             wb.ExportAsFixedFormat(
                                 Type=0,  # xlTypePDF
@@ -584,32 +672,52 @@ class FormatConverter:
                                 To=to_page,
                                 OpenAfterPublish=False
                             )
+                        print(f"[Excel COM] ExportAsFixedFormat call completed (no exception)")
                         
                         # Wait and verify
+                        print(f"[Excel COM] Waiting 2 seconds for file system...")
                         time.sleep(2.0)
+                        
+                        print(f"[Excel COM] Verifying file creation (5 attempts)...")
                         for attempt in range(5):
-                            if os.path.exists(abs_output) and os.path.getsize(abs_output) > 0:
-                                print(f"[Excel COM] ✓ METHOD 1 SUCCESS ({os.path.getsize(abs_output):,} bytes)")
-                                export_success = True
-                                method_used = "ExportAsFixedFormat (Standard)"
-                                break
+                            print(f"[Excel COM]   Attempt {attempt + 1}/5: Checking {os.path.basename(abs_output)}...")
+                            if os.path.exists(abs_output):
+                                size = os.path.getsize(abs_output)
+                                print(f"[Excel COM]   File exists! Size: {size:,} bytes")
+                                if size > 0:
+                                    print(f"[Excel COM] [OK][OK][OK] METHOD 1 SUCCESS ({size:,} bytes) [OK][OK][OK]")
+                                    export_success = True
+                                    method_used = "ExportAsFixedFormat (Standard)"
+                                    break
+                                else:
+                                    print(f"[Excel COM]   File exists but size is 0!")
+                            else:
+                                print(f"[Excel COM]   File not found yet")
                             time.sleep(0.5)
                         
                         if not export_success:
-                            print(f"[Excel COM] ✗ METHOD 1 FAILED - File not created")
+                            last_error = "File not created after 5 verification attempts"
+                            print(f"[Excel COM] [X][X][X] METHOD 1 FAILED: {last_error}")
                     except Exception as e:
-                        print(f"[Excel COM] ✗ METHOD 1 EXCEPTION: {e}")
+                        last_error = str(e)
+                        print(f"[Excel COM] [X][X][X] METHOD 1 EXCEPTION: {last_error}")
+                        import traceback
+                        traceback.print_exc()
                 
                 # ============================================================
                 # METHOD 2: ExportAsFixedFormat - Minimum Quality (Faster)
                 # ============================================================
                 if not export_success:
                     try:
-                        print(f"\n[Excel COM] === METHOD 2: ExportAsFixedFormat (Min Quality) ===")
+                        print(f"\n[Excel COM] ╔══════════════════════════════════════════════════════════╗")
+                        print(f"[Excel COM] ║ METHOD 2: ExportAsFixedFormat (Minimum Quality)         ║")
+                        print(f"[Excel COM] ╚══════════════════════════════════════════════════════════╝")
                         
                         if os.path.exists(abs_output):
                             os.remove(abs_output)
+                            print(f"[Excel COM] Removed partial file")
                         
+                        print(f"[Excel COM] Calling ExportAsFixedFormat with Quality=1 (Minimum)...")
                         wb.ExportAsFixedFormat(
                             Type=0,
                             Filename=abs_output,
@@ -618,20 +726,40 @@ class FormatConverter:
                             IgnorePrintAreas=False,
                             OpenAfterPublish=False
                         )
+                        print(f"[Excel COM] Call completed")
                         
                         time.sleep(2.0)
+                        print(f"[Excel COM] Verifying (5 attempts)...")
                         for attempt in range(5):
+                            print(f"[Excel COM]   Attempt {attempt + 1}/5...")
                             if os.path.exists(abs_output) and os.path.getsize(abs_output) > 0:
-                                print(f"[Excel COM] ✓ METHOD 2 SUCCESS ({os.path.getsize(abs_output):,} bytes)")
+                                size = os.path.getsize(abs_output)
+                                print(f"[Excel COM] [OK][OK][OK] METHOD 2 SUCCESS ({size:,} bytes) [OK][OK][OK]")
                                 export_success = True
                                 method_used = "ExportAsFixedFormat (Min Quality)"
                                 break
                             time.sleep(0.5)
                         
                         if not export_success:
-                            print(f"[Excel COM] ✗ METHOD 2 FAILED")
+                            last_error = "File not created"
+                            print(f"[Excel COM] [X][X][X] METHOD 2 FAILED")
                     except Exception as e:
-                        print(f"[Excel COM] ✗ METHOD 2 EXCEPTION: {e}")
+                        last_error = str(e)
+                        print(f"[Excel COM] [X][X][X] METHOD 2 EXCEPTION: {last_error}")
+                        
+                        time.sleep(2.0)
+                        for attempt in range(5):
+                            if os.path.exists(abs_output) and os.path.getsize(abs_output) > 0:
+                                print(f"[Excel COM] [OK] METHOD 2 SUCCESS ({os.path.getsize(abs_output):,} bytes)")
+                                export_success = True
+                                method_used = "ExportAsFixedFormat (Min Quality)"
+                                break
+                            time.sleep(0.5)
+                        
+                        if not export_success:
+                            print(f"[Excel COM] [X] METHOD 2 FAILED")
+                    except Exception as e:
+                        print(f"[Excel COM] [X] METHOD 2 EXCEPTION: {e}")
                 
                 # ============================================================
                 # METHOD 3: ExportAsFixedFormat - Minimal Parameters Only
@@ -649,16 +777,16 @@ class FormatConverter:
                         time.sleep(2.0)
                         for attempt in range(5):
                             if os.path.exists(abs_output) and os.path.getsize(abs_output) > 0:
-                                print(f"[Excel COM] ✓ METHOD 3 SUCCESS ({os.path.getsize(abs_output):,} bytes)")
+                                print(f"[Excel COM] [OK] METHOD 3 SUCCESS ({os.path.getsize(abs_output):,} bytes)")
                                 export_success = True
                                 method_used = "ExportAsFixedFormat (Minimal)"
                                 break
                             time.sleep(0.5)
                         
                         if not export_success:
-                            print(f"[Excel COM] ✗ METHOD 3 FAILED")
+                            print(f"[Excel COM] [X] METHOD 3 FAILED")
                     except Exception as e:
-                        print(f"[Excel COM] ✗ METHOD 3 EXCEPTION: {e}")
+                        print(f"[Excel COM] [X] METHOD 3 EXCEPTION: {e}")
                 
                 # ============================================================
                 # METHOD 4: SaveAs with FileFormat=57 (xlTypePDF)
@@ -679,16 +807,16 @@ class FormatConverter:
                         time.sleep(2.0)
                         for attempt in range(5):
                             if os.path.exists(abs_output) and os.path.getsize(abs_output) > 0:
-                                print(f"[Excel COM] ✓ METHOD 4 SUCCESS ({os.path.getsize(abs_output):,} bytes)")
+                                print(f"[Excel COM] [OK] METHOD 4 SUCCESS ({os.path.getsize(abs_output):,} bytes)")
                                 export_success = True
                                 method_used = "SaveAs (xlTypePDF)"
                                 break
                             time.sleep(0.5)
                         
                         if not export_success:
-                            print(f"[Excel COM] ✗ METHOD 4 FAILED")
+                            print(f"[Excel COM] [X] METHOD 4 FAILED")
                     except Exception as e:
-                        print(f"[Excel COM] ✗ METHOD 4 EXCEPTION: {e}")
+                        print(f"[Excel COM] [X] METHOD 4 EXCEPTION: {e}")
                 
                 # ============================================================
                 # METHOD 5: PrintOut to Microsoft Print to PDF
@@ -716,16 +844,16 @@ class FormatConverter:
                         time.sleep(3.0)  # Print queue needs more time
                         for attempt in range(5):
                             if os.path.exists(abs_output) and os.path.getsize(abs_output) > 0:
-                                print(f"[Excel COM] ✓ METHOD 5 SUCCESS ({os.path.getsize(abs_output):,} bytes)")
+                                print(f"[Excel COM] [OK] METHOD 5 SUCCESS ({os.path.getsize(abs_output):,} bytes)")
                                 export_success = True
                                 method_used = "PrintOut"
                                 break
                             time.sleep(0.5)
                         
                         if not export_success:
-                            print(f"[Excel COM] ✗ METHOD 5 FAILED")
+                            print(f"[Excel COM] [X] METHOD 5 FAILED")
                     except Exception as e:
-                        print(f"[Excel COM] ✗ METHOD 5 EXCEPTION: {e}")
+                        print(f"[Excel COM] [X] METHOD 5 EXCEPTION: {e}")
                 
                 # ============================================================
                 # METHOD 6: Per-Sheet Export (All Sheets)
@@ -766,91 +894,107 @@ class FormatConverter:
                         time.sleep(2.0)
                         for attempt in range(5):
                             if os.path.exists(abs_output) and os.path.getsize(abs_output) > 0:
-                                print(f"[Excel COM] ✓ METHOD 6 SUCCESS ({os.path.getsize(abs_output):,} bytes)")
+                                print(f"[Excel COM] [OK] METHOD 6 SUCCESS ({os.path.getsize(abs_output):,} bytes)")
                                 export_success = True
                                 method_used = "Per-Sheet Export"
                                 break
                             time.sleep(0.5)
                         
                         if not export_success:
-                            print(f"[Excel COM] ✗ METHOD 6 FAILED")
+                            print(f"[Excel COM] [X] METHOD 6 FAILED")
                     except Exception as e:
-                        print(f"[Excel COM] ✗ METHOD 6 EXCEPTION: {e}")
+                        print(f"[Excel COM] [X] METHOD 6 EXCEPTION: {e}")
                 
                 # List directory AFTER conversion
-                print(f"\n[Excel COM] ===== POST-CONVERSION STATE =====")
+                print(f"\n[Excel COM] {'='*60}")
+                print(f"[Excel COM] POST-CONVERSION STATE")
+                print(f"[Excel COM] {'='*60}")
                 try:
                     files_after = list(Path(output_dir_path).iterdir())
                     print(f"[Excel COM] Files in output dir: {len(files_after)}")
-                    for f in sorted(files_after)[:10]:
+                    for f in sorted(files_after)[:15]:
                         if f.is_file():
-                            marker = "<<<" if f.name == Path(abs_output).name else "   "
-                            print(f"[Excel COM] {marker} {f.name} ({f.stat().st_size:,} bytes)")
+                            marker = " <<<TARGET" if f.name == Path(abs_output).name else ""
+                            print(f"[Excel COM]   - {f.name} ({f.stat().st_size:,} bytes){marker}")
                 except Exception as e:
                     print(f"[Excel COM] Could not list directory: {e}")
                 
                 # Report final result
+                print(f"\n[Excel COM] {'='*60}")
                 if export_success:
-                    print(f"\n[Excel COM] ✓✓✓ SUCCESS: PDF created using {method_used} ✓✓✓")
+                    print(f"[Excel COM] [OK][OK][OK] PDF EXPORT SUCCESSFUL [OK][OK][OK]")
+                    print(f"[Excel COM] Method used: {method_used}")
+                    print(f"[Excel COM] File: {os.path.basename(abs_output)}")
                 else:
-                    print(f"\n[Excel COM] ✗✗✗ ALL COM METHODS FAILED ✗✗✗")
+                    print(f"[Excel COM] [X][X][X] ALL 6 COM METHODS FAILED [X][X][X]")
+                    print(f"[Excel COM] Last error: {last_error}")
+                    print(f"[Excel COM] Will attempt LibreOffice fallback during verification...")
+                print(f"[Excel COM] {'='*60}")
                 
-                print(f"[Excel COM] Closing workbook...")
+                print(f"\n[Excel COM] Closing workbook...")
                 wb.Close(SaveChanges=False)
+                print(f"[Excel COM] [OK] Workbook closed")
                 
             except Exception as e:
-                print(f"Error in Excel COM operation: {str(e)}")
+                print(f"\n[Excel COM] [X] FATAL ERROR in Excel COM operation: {str(e)}")
+                import traceback
+                traceback.print_exc()
                 # Try to close workbook if it's open
                 try:
                     if 'wb' in locals():
+                        print(f"[Excel COM] Attempting to close workbook after error...")
                         wb.Close(SaveChanges=False)
+                        print(f"[Excel COM] Workbook closed")
                 except:
-                    pass
+                    print(f"[Excel COM] Could not close workbook")
                 raise
             finally:
                 try:
-                    print(f"[Excel COM] Quitting Excel application")
+                    print(f"[Excel COM] Quitting Excel application...")
                     excel.Quit()
-                    # Give Excel time to fully quit
-                    import time
-                    time.sleep(0.3)
-                    print(f"[Excel COM] Excel quit successfully")
+                    time.sleep(0.5)
+                    print(f"[Excel COM] [OK] Excel quit successfully")
                 except Exception as e:
                     print(f"[Excel COM] Error quitting Excel: {str(e)}")
         finally:
             pythoncom.CoUninitialize()
-            print(f"[Excel COM] COM uninitialized")
+            print(f"[Excel COM] [OK] COM uninitialized")
         
         # Final verification with comprehensive checks
-        print(f"\n[Excel COM] ===== FINAL VERIFICATION =====")
+        print(f"\n[Excel COM] {'='*60}")
+        print(f"[Excel COM] FINAL VERIFICATION")
+        print(f"[Excel COM] {'='*60}")
         print(f"[Excel COM] Expected path: {output_path}")
         print(f"[Excel COM] Absolute path: {os.path.abspath(output_path)}")
+        print(f"[Excel COM] File exists: {os.path.exists(output_path)}")
         
         if os.path.exists(output_path):
             file_size = os.path.getsize(output_path)
-            print(f"[Excel COM] ✓ File exists: {file_size:,} bytes")
+            print(f"[Excel COM] File size: {file_size:,} bytes")
             
             if file_size == 0:
-                print(f"[Excel COM] ✗ WARNING: File is empty!")
+                print(f"[Excel COM] [X] WARNING: File exists but is EMPTY (0 bytes)")
                 # Try LibreOffice as last resort
                 if LIBREOFFICE_AVAILABLE:
                     print(f"[Excel COM] Attempting LibreOffice conversion as fallback...")
                     try:
                         self._libreoffice_to_pdf(input_path, output_path)
                         if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
-                            print(f"[Excel COM] ✓ LibreOffice fallback succeeded")
+                            print(f"[Excel COM] [OK] LibreOffice fallback succeeded")
                             return
                     except Exception as lo_error:
                         print(f"[Excel COM] LibreOffice fallback failed: {lo_error}")
                 
                 raise RuntimeError(f"PDF file is empty (0 bytes): {output_path}")
             
-            print(f"[Excel COM] ✓✓✓ PDF VERIFICATION PASSED ✓✓✓")
+            print(f"[Excel COM] [OK][OK][OK] FINAL VERIFICATION PASSED [OK][OK][OK]")
+            print(f"[Excel COM] PDF successfully created: {file_size:,} bytes")
         else:
-            print(f"[Excel COM] ✗ File does NOT exist")
+            print(f"[Excel COM] [X] FILE DOES NOT EXIST at expected path")
             
             # List directory contents
             output_dir = os.path.dirname(output_path)
+            print(f"[Excel COM] Listing directory: {output_dir}")
             if os.path.exists(output_dir):
                 try:
                     files = list(Path(output_dir).iterdir())
@@ -858,31 +1002,87 @@ class FormatConverter:
                     for f in sorted(files)[:20]:
                         if f.is_file():
                             print(f"[Excel COM]   - {f.name} ({f.stat().st_size:,} bytes)")
+                        else:
+                            print(f"[Excel COM]   - {f.name}/ (directory)")
                 except Exception as e:
                     print(f"[Excel COM] Error listing directory: {e}")
+            else:
+                print(f"[Excel COM] [X] Output directory does not exist!")
             
             # Try LibreOffice as last resort
             if LIBREOFFICE_AVAILABLE:
-                print(f"\n[Excel COM] ===== ATTEMPTING LIBREOFFICE FALLBACK =====")
-                print(f"[Excel COM] All COM methods failed, trying LibreOffice...")
+                print(f"\n[Excel COM] {'='*60}")
+                print(f"[Excel COM] ATTEMPTING LIBREOFFICE FALLBACK")
+                print(f"[Excel COM] All COM methods failed, trying LibreOffice as last resort...")
+                print(f"[Excel COM] NOTE: LibreOffice may have formatting differences")
+                print(f"[Excel COM] {'='*60}")
                 try:
                     self._libreoffice_to_pdf(input_path, output_path)
                     
                     # Verify LibreOffice output
+                    time.sleep(1)
                     if os.path.exists(output_path):
                         file_size = os.path.getsize(output_path)
                         if file_size > 0:
-                            print(f"[Excel COM] ✓ LibreOffice fallback succeeded: {file_size:,} bytes")
-                            print(f"[Excel COM] NOTE: LibreOffice may have formatting differences from Excel")
+                            print(f"[Excel COM] [OK][OK][OK] LibreOffice fallback succeeded: {file_size:,} bytes")
+                            print(f"[Excel COM] WARNING: PDF created by LibreOffice, not Excel COM")
+                            print(f"[Excel COM] There may be formatting differences from Excel")
                             return
                         else:
-                            print(f"[Excel COM] ✗ LibreOffice created empty file")
+                            print(f"[Excel COM] [X] LibreOffice created empty file")
                     else:
-                        print(f"[Excel COM] ✗ LibreOffice did not create file")
+                        print(f"[Excel COM] [X] LibreOffice did not create file")
                 except Exception as lo_error:
-                    print(f"[Excel COM] ✗ LibreOffice fallback failed: {lo_error}")
+                    print(f"[Excel COM] [X] LibreOffice fallback failed: {lo_error}")
+                    import traceback
+                    traceback.print_exc()
             
-            raise RuntimeError(f"PDF file was not created after trying all methods (COM + LibreOffice): {output_path}")
+            # Final failure message - include debug log
+            error_summary = f"""
+{'='*60}
+EXCEL TO PDF CONVERSION FAILED
+{'='*60}
+Input:  {input_path} ({os.path.getsize(input_path):,} bytes)
+Output: {output_path}
+
+All 6 COM methods failed:
+  1. ExportAsFixedFormat (Standard Quality)
+  2. ExportAsFixedFormat (Minimum Quality)
+  3. ExportAsFixedFormat (Minimal Parameters)
+  4. SaveAs (FileFormat=57)
+  5. PrintOut (Microsoft Print to PDF)
+  6. Per-Sheet Export
+
+LibreOffice fallback: {'FAILED' if LIBREOFFICE_AVAILABLE else 'NOT AVAILABLE'}
+
+Possible causes:
+- Excel COM automation blocked by security settings
+- Insufficient permissions to write to output directory
+- Excel not properly installed or registered
+- File path encoding issues
+- Antivirus blocking COM operations
+
+Check the detailed logs above for specific error messages.
+{'='*60}
+"""
+            print(f"[Excel COM] {error_summary}")
+            
+            # Capture debug log and include in exception
+            debug_output = debug_log.getvalue()
+            full_error = f"""PDF file was not created after trying all methods (6 COM + LibreOffice): {output_path}
+
+{'='*60}
+DETAILED LOG FILE LOCATION:
+{'='*60}
+{log_path}
+
+You can open this file to see the complete debugging output.
+
+{'='*60}
+DEBUG LOG (SUMMARY):
+{'='*60}
+{debug_output}"""
+            raise RuntimeError(full_error)
     
     def _xlsx_to_pdf_reportlab(self, input_path: str, output_path: str):
         """Convert Excel to PDF using ReportLab (fallback)."""

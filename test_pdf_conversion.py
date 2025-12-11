@@ -23,7 +23,7 @@ try:
     
     test_docx = test_dir / 'test.docx'
     doc.save(str(test_docx))
-    print(f'✅ Created test document: {test_docx}')
+    print(f'[OK] Created test document: {test_docx}')
     
     # Test conversion
     converter = FormatConverter()
@@ -34,12 +34,12 @@ try:
     )
     
     if os.path.exists(output_pdf):
-        print(f'✅ PDF conversion successful: {output_pdf}')
+        print(f'[OK] PDF conversion successful: {output_pdf}')
         print(f'   PDF size: {os.path.getsize(output_pdf)} bytes')
     else:
-        print(f'❌ PDF not created')
+        print(f'[ERROR] PDF not created')
         
 except Exception as e:
-    print(f'❌ Error: {e}')
+    print(f'[ERROR] Error: {e}')
     import traceback
     traceback.print_exc()

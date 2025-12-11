@@ -15,9 +15,9 @@ is_valid, message = validator.validate()
 
 print("-" * 60)
 if is_valid:
-    print(f"✅ Result: APPROVED - All users can access")
+    print(f"[OK] Result: APPROVED - All users can access")
 else:
-    print(f"❌ Result: DENIED - All users are blocked")
+    print(f"[ERROR] Result: DENIED - All users are blocked")
 print(f"Message: {message}")
 print("-" * 60)
 print(f"\nTo enable access for ALL users:")

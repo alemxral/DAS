@@ -33,9 +33,9 @@ for i in range(3):
         pdf_path = converter.convert(str(test_docx), 'pdf', str(test_dir))
         elapsed = time.time() - start
         times.append(elapsed)
-        print(f"✅ Completed in {elapsed:.2f}s")
+        print(f"[OK] Completed in {elapsed:.2f}s")
     except Exception as e:
-        print(f"❌ Failed: {e}")
+        print(f"[ERROR] Failed: {e}")
 
 if times:
     print("\n" + "=" * 60)

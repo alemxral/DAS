@@ -640,20 +640,33 @@ class JobManager:
                                 job.add_output_file(output_file)
                                 
                             except Exception as conv_error:
-                                print(f"Row {idx}: Error converting to {output_format}: {str(conv_error)}")
+                                # Preserve full error message including debug logs
+                                full_error = str(conv_error)
+                                error_detail = f"Row {idx}: Error converting to {output_format}:\n{full_error}"
+                                print(f"\n{'='*80}")
+                                print(f"[JobManager] CONVERSION ERROR FOR ROW {idx}")
+                                print(f"{'='*80}")
+                                print(error_detail)
+                                print(f"{'='*80}\n")
+                                # Store detailed error in job for UI display (includes debug log)
+                                if not job.error_message:
+                                    job.error_message = error_detail
+                                else:
+                                    job.error_message += f"\n\n{error_detail}"
                                 raise
                     
                     job.increment_processed()
                     print(f"Row {idx}: Completed successfully")
                     
                 except Exception as e:
-                    error_msg = f"Error processing row {idx}: {str(e)}"
-                    print(error_msg)
-                    import traceback
-                    traceback.print_exc()
+                    # Error already logged with full details in inner exception handler
+                    # Just increment failed count
+                    print(f"\n{'='*80}")
+                    print(f"[JobManager] Row {idx} processing failed - error details captured above")
+                    print(f"{'='*80}\n")
                     job.increment_failed()
-                    if not job.error_message:
-                        job.error_message = error_msg
+                    # Error message already set in inner exception handler with full debug log
+                    # Don't overwrite or duplicate it here
                 
                 # Batched metadata saves: save every 10 rows or every 5 seconds
                 rows_since_save += 1
@@ -784,7 +797,12 @@ class JobManager:
             job.update_status(JobStatus.COMPLETED)
             
         except Exception as e:
-            job.update_status(JobStatus.FAILED, str(e))
+            # Don't overwrite detailed error message if already set
+            if not job.error_message:
+                job.update_status(JobStatus.FAILED, str(e))
+            else:
+                # Keep existing detailed error (with debug logs) and just update status
+                job.update_status(JobStatus.FAILED)
         
         self.save_job_metadata(job)
         return job

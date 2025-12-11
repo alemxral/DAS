@@ -97,7 +97,7 @@ def run_tests():
         result = subprocess.run(cmd, cwd=project_root)
         exit_code = result.returncode
     except Exception as e:
-        print(f"\n❌ Error running tests: {e}")
+        print(f"\n[ERROR] Error running tests: {e}")
         exit_code = 1
     
     # Summary
@@ -105,9 +105,9 @@ def run_tests():
     print(f"Completed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     
     if exit_code == 0:
-        print("✅ All tests PASSED")
+        print("[OK] All tests PASSED")
     else:
-        print(f"❌ Tests FAILED (exit code: {exit_code})")
+        print(f"[ERROR] Tests FAILED (exit code: {exit_code})")
     
     print("=" * 80)
     

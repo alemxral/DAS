@@ -33,10 +33,10 @@ start = time.time()
 try:
     pdf_path = converter.convert(str(test_docx), 'pdf', str(test_dir))
     libreoffice_time = time.time() - start
-    print(f"✅ LibreOffice: {libreoffice_time:.2f} seconds")
+    print(f"[OK] LibreOffice: {libreoffice_time:.2f} seconds")
     print(f"   PDF size: {os.path.getsize(pdf_path):,} bytes")
 except Exception as e:
-    print(f"❌ LibreOffice failed: {e}")
+    print(f"[ERROR] LibreOffice failed: {e}")
     libreoffice_time = None
 
 print("\n" + "=" * 60)
@@ -44,4 +44,4 @@ print("Summary:")
 print("=" * 60)
 if libreoffice_time:
     print(f"LibreOffice: {libreoffice_time:.2f}s")
-    print("\n✅ LibreOffice portable is working and fast!")
+    print("\n[OK] LibreOffice portable is working and fast!")

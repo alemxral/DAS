@@ -27,10 +27,16 @@ class Config:
         # Store user data in AppData
         DATA_ROOT = Path.home() / 'AppData' / 'Local' / 'DocumentAutomation'
         DATA_ROOT.mkdir(parents=True, exist_ok=True)
+        # Logs directory in AppData
+        LOGS_DIR = DATA_ROOT / 'logs'
+        LOGS_DIR.mkdir(parents=True, exist_ok=True)
     else:
         # Running in normal Python environment
         BASE_DIR = Path(__file__).parent.parent  # Project root directory
         DATA_ROOT = BASE_DIR
+        # Logs directory in project root for dev
+        LOGS_DIR = BASE_DIR / 'logs'
+        LOGS_DIR.mkdir(parents=True, exist_ok=True)
     print(f"[CONFIG] __file__ = {__file__}")
     print(f"[CONFIG] BASE_DIR = {BASE_DIR}")
     print(f"[CONFIG] BASE_DIR (absolute) = {BASE_DIR.absolute()}")
@@ -50,6 +56,7 @@ class Config:
     print(f"[CONFIG] JOBS_DIR = {JOBS_DIR}")
     print(f"[CONFIG] STORAGE_DIR = {STORAGE_DIR}")
     print(f"[CONFIG] UPLOAD_DIR = {UPLOAD_DIR}")
+    print(f"[CONFIG] LOGS_DIR = {LOGS_DIR}")
     
     # File upload settings
     MAX_CONTENT_LENGTH = int(os.getenv('MAX_CONTENT_LENGTH', 100 * 1024 * 1024))  # 100MB default

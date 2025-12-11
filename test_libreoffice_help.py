@@ -21,6 +21,6 @@ try:
         print(result.stdout[:500])
         
 except subprocess.TimeoutExpired:
-    print('❌ Timed out')
+    print('[ERROR] Timed out')
 except Exception as e:
-    print(f'❌ Error: {e}')
+    print(f'[ERROR] Error: {e}')

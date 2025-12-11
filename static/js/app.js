@@ -4,6 +4,14 @@ const API_BASE = '/api';
 let refreshInterval = null;
 let templatesData = [];  // Store templates for multi-template mode
 
+// HTML escape function to prevent XSS and rendering issues
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
 // Toast notification function
 function showToast(message, type = 'info', title = '') {
     const container = document.getElementById('toastContainer');
@@ -183,7 +191,7 @@ function createJobCard(job) {
             
             ${job.error_message ? `
                 <div class="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
-                    <p class="text-sm text-red-800"><strong>Error:</strong> ${job.error_message}</p>
+                    <p class="text-sm text-red-800"><strong>Error:</strong> ${escapeHtml(job.error_message)}</p>
                 </div>
             ` : ''}
             
@@ -846,7 +854,7 @@ async function openJobDetails(jobId) {
                                 ${job.error_message ? `
                                     <div>
                                         <label class="block text-sm font-medium text-gray-700 mb-1">Error Message</label>
-                                        <p class="text-red-600 break-words">${job.error_message}</p>
+                                        <pre class="text-red-600 break-words whitespace-pre-wrap text-sm font-mono bg-red-50 p-3 rounded border border-red-200 max-h-96 overflow-y-auto">${escapeHtml(job.error_message)}</pre>
                                     </div>
                                 ` : ''}
                                 

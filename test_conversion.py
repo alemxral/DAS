@@ -33,18 +33,18 @@ try:
     pdf_path = converter.convert(test_docx, 'pdf', test_dir)
     elapsed = time.time() - start
     
-    print(f'\n✅ Conversion successful!')
+    print(f'\n[OK] Conversion successful!')
     print(f'PDF created: {pdf_path}')
     print(f'Time taken: {elapsed:.2f} seconds')
     print(f'PDF size: {os.path.getsize(pdf_path) / 1024:.1f} KB')
     
     if os.path.exists(pdf_path):
-        print(f'\n✅ PDF file exists and is ready!')
+        print(f'\n[OK] PDF file exists and is ready!')
     else:
-        print(f'\n❌ PDF file not found!')
+        print(f'\n[ERROR] PDF file not found!')
         
 except Exception as e:
-    print(f'\n❌ Conversion failed: {e}')
+    print(f'\n[ERROR] Conversion failed: {e}')
     import traceback
     traceback.print_exc()
 

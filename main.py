@@ -77,7 +77,41 @@ def start_flask():
 
 def main():
     """Initialize and start the desktop application."""
+    # Setup logging to file
+    from config.config import Config
+    from datetime import datetime
+    import sys
+    
+    log_filename = f"app_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+    log_path = Path(Config.LOGS_DIR) / log_filename
+    
+    # Create a tee that writes to both console and file
+    class TeeLogger:
+        def __init__(self, *files):
+            self.files = [f for f in files if f is not None]
+        def write(self, data):
+            for f in self.files:
+                if f is not None:
+                    try:
+                        f.write(data)
+                        f.flush()
+                    except (AttributeError, ValueError, OSError):
+                        pass
+        def flush(self):
+            for f in self.files:
+                if f is not None:
+                    try:
+                        f.flush()
+                    except (AttributeError, ValueError, OSError):
+                        pass
+    
+    # Open log file and redirect stdout/stderr
+    log_file = open(log_path, 'w', encoding='utf-8')
+    sys.stdout = TeeLogger(sys.__stdout__, log_file)
+    sys.stderr = TeeLogger(sys.__stderr__, log_file)
+    
     print("Starting Document Automation System...")
+    print(f"Application log: {log_path}")
     
     # Validate license
     validator = LicenseValidator()

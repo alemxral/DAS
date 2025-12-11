@@ -13,6 +13,6 @@ print(f'Path exists: {os.path.exists(path)}')
 print(f'LibreOffice available: {LIBREOFFICE_AVAILABLE}')
 
 if LIBREOFFICE_AVAILABLE:
-    print('\n✅ LibreOffice is ready to use!')
+    print('\n[OK] LibreOffice is ready to use!')
 else:
-    print('\n❌ LibreOffice not detected')
+    print('\n[ERROR] LibreOffice not detected')
