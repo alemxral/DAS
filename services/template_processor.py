@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 from typing import Dict, List
 import shutil
+from utils.file_handlers import open_workbook_safe
 
 try:
     from docx import Document
@@ -38,10 +39,9 @@ class TemplateProcessor:
     def __init__(self):
         """Initialize TemplateProcessor."""
         self.supported_formats = ['.docx', '.xlsx', '.msg']
-        # Template caches for performance - avoids reloading same template
+        # Template caches for document templates only (not workbooks)
         self._docx_cache = {}
-        self._xlsx_cache = {}
-        print("[TemplateProcessor] Initialized with template caching enabled")
+        print("[TemplateProcessor] Initialized")
     
     def is_supported_format(self, file_path: str) -> bool:
         """Check if file format is supported."""
@@ -101,14 +101,13 @@ class TemplateProcessor:
         if openpyxl is None:
             raise ImportError("openpyxl is required for Excel templates")
         
-        wb = openpyxl.load_workbook(file_path)
         variables = set()
-        
-        for sheet in wb.worksheets:
-            for row in sheet.iter_rows():
-                for cell in row:
-                    if cell.value and isinstance(cell.value, str):
-                        variables.update(self.VARIABLE_PATTERN.findall(cell.value))
+        with open_workbook_safe(file_path, data_only=True, read_only=True) as wb:
+            for sheet in wb.worksheets:
+                for row in sheet.iter_rows():
+                    for cell in row:
+                        if cell.value and isinstance(cell.value, str):
+                            variables.update(self.VARIABLE_PATTERN.findall(cell.value))
         
         return sorted(list(variables))
     
@@ -225,66 +224,60 @@ class TemplateProcessor:
         return output_path
     
     def _process_xlsx_template(self, template_path: str, data: Dict, output_path: str, sheet_name: str = None, auto_adjust_options: Dict = None) -> str:
-        """Process Excel template with caching for performance."""
+        """Process Excel template."""
         if openpyxl is None:
             raise ImportError("openpyxl is required for Excel templates")
         
-        # Load from cache or disk
-        if template_path not in self._xlsx_cache:
-            print(f"[TemplateProcessor] Caching Excel template: {Path(template_path).name}")
-            self._xlsx_cache[template_path] = openpyxl.load_workbook(template_path)
-        
-        # Load a fresh copy from the cached path (avoid deepcopy issues with openpyxl)
-        wb = openpyxl.load_workbook(template_path)
-        
         try:
-            # Track modified cells for auto-adjust
-            modified_cells = set()
-            
-            # Determine which sheets to process
-            sheets_to_process = []
-            if sheet_name:
-                # Process only the specified sheet
-                if sheet_name in wb.sheetnames:
-                    sheets_to_process = [wb[sheet_name]]
-                else:
-                    raise ValueError(f"Sheet '{sheet_name}' not found in template")
-            else:
-                # Process all sheets
-                sheets_to_process = wb.worksheets
-            
-            for sheet in sheets_to_process:
-                replacements_made = 0
-                for row in sheet.iter_rows():
-                    for cell in row:
-                        if cell.value and isinstance(cell.value, str):
-                            original_value = cell.value
-                            new_value = cell.value
-                            for var_name, value in data.items():
-                                placeholder = f"##{var_name}##"
-                                if placeholder in new_value:
-                                    new_value = new_value.replace(placeholder, str(value))
-                                    replacements_made += 1
-                            if new_value != cell.value:
-                                cell.value = new_value
-                                # Track modified cell (sheet_title, row, col) tuple
-                                modified_cells.add((sheet.title, cell.row, cell.column))
+            # Load template with safe handler
+            with open_workbook_safe(template_path) as wb:
+                # Track modified cells for auto-adjust
+                modified_cells = set()
                 
-                print(f"[TemplateProcessor] Sheet '{sheet.title}': Made {replacements_made} replacements")
-            
-            print(f"[TemplateProcessor] Total modified cells: {len(modified_cells)}")
-            
-            # Apply auto-adjust if options provided
-            if auto_adjust_options:
-                self._apply_excel_auto_adjust(wb, sheets_to_process, modified_cells, auto_adjust_options)
-            
-            # Save the workbook
-            os.makedirs(os.path.dirname(output_path), exist_ok=True)
-            wb.save(output_path)
-            return output_path
-        finally:
-            # Always close the workbook to release file handle
-            wb.close()
+                # Determine which sheets to process
+                sheets_to_process = []
+                if sheet_name:
+                    # Process only the specified sheet
+                    if sheet_name in wb.sheetnames:
+                        sheets_to_process = [wb[sheet_name]]
+                    else:
+                        raise ValueError(f"Sheet '{sheet_name}' not found in template")
+                else:
+                    # Process all sheets
+                    sheets_to_process = wb.worksheets
+                
+                for sheet in sheets_to_process:
+                    replacements_made = 0
+                    for row in sheet.iter_rows():
+                        for cell in row:
+                            if cell.value and isinstance(cell.value, str):
+                                original_value = cell.value
+                                new_value = cell.value
+                                for var_name, value in data.items():
+                                    placeholder = f"##{var_name}##"
+                                    if placeholder in new_value:
+                                        new_value = new_value.replace(placeholder, str(value))
+                                        replacements_made += 1
+                                if new_value != cell.value:
+                                    cell.value = new_value
+                                    # Track modified cell (sheet_title, row, col) tuple
+                                    modified_cells.add((sheet.title, cell.row, cell.column))
+                    
+                    print(f"[TemplateProcessor] Sheet '{sheet.title}': Made {replacements_made} replacements")
+                
+                print(f"[TemplateProcessor] Total modified cells: {len(modified_cells)}")
+                
+                # Apply auto-adjust if options provided
+                if auto_adjust_options:
+                    self._apply_excel_auto_adjust(wb, sheets_to_process, modified_cells, auto_adjust_options)
+                
+                # Save the workbook
+                os.makedirs(os.path.dirname(output_path), exist_ok=True)
+                wb.save(output_path)
+                return output_path
+        except Exception as e:
+            print(f"[TemplateProcessor] Error processing Excel template: {e}")
+            raise
     
     def _apply_excel_auto_adjust(self, wb, sheets: list, modified_cells: set, options: Dict):
         """

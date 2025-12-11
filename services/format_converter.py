@@ -9,6 +9,7 @@ import subprocess
 import time
 from pathlib import Path
 from typing import List, Dict, Optional
+from utils.file_handlers import open_workbook_safe
 
 try:
     from docx import Document
@@ -440,15 +441,8 @@ class FormatConverter:
                 abs_output = os.path.abspath(output_path)
                 
                 print(f"[Excel COM] Opening workbook: {abs_input}")
-                wb = excel.Workbooks.Open(abs_input, ReadOnly=False, UpdateLinks=False)
+                wb = excel.Workbooks.Open(abs_input, ReadOnly=True, UpdateLinks=False)
                 print(f"[Excel COM] Workbook opened successfully")
-                
-                # Save the workbook first to ensure it's not in a temporary state
-                try:
-                    wb.Save()
-                    print(f"[Excel COM] Workbook saved")
-                except Exception as e:
-                    print(f"[Excel COM] Warning: Could not save workbook: {str(e)}")
                 
                 # Apply print settings if provided
                 if print_settings:
@@ -643,22 +637,22 @@ class FormatConverter:
         if openpyxl is None:
             raise ImportError("openpyxl is required for Excel reading")
         
-        wb = openpyxl.load_workbook(input_path)
-        sheet = wb.active
-        
-        # Create PDF
-        doc = SimpleDocTemplate(output_path, pagesize=A4)
-        elements = []
-        styles = getSampleStyleSheet()
-        
-        # Add title
-        elements.append(Paragraph(f"<b>{Path(input_path).stem}</b>", styles['Title']))
-        elements.append(Spacer(1, 12))
-        
-        # Convert sheet to table data
-        data = []
-        for row in sheet.iter_rows(values_only=True):
-            data.append([str(cell) if cell is not None else "" for cell in row])
+        with open_workbook_safe(input_path, data_only=True, read_only=True) as wb:
+            sheet = wb.active
+            
+            # Convert sheet to table data
+            data = []
+            for row in sheet.iter_rows(values_only=True):
+                data.append([str(cell) if cell is not None else "" for cell in row])
+            
+            # Create PDF
+            doc = SimpleDocTemplate(output_path, pagesize=A4)
+            elements = []
+            styles = getSampleStyleSheet()
+            
+            # Add title
+            elements.append(Paragraph(f"<b>{Path(input_path).stem}</b>", styles['Title']))
+            elements.append(Spacer(1, 12))
         
         if data:
             table = Table(data)

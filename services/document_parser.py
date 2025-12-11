@@ -6,6 +6,7 @@ import pandas as pd
 import re
 from typing import List, Dict, Tuple
 from pathlib import Path
+from utils.file_handlers import open_workbook_safe
 
 
 class DocumentParser:
@@ -45,11 +46,9 @@ class DocumentParser:
             return []
         
         try:
-            import openpyxl
-            wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
-            sheets = wb.sheetnames
-            wb.close()
-            return sheets
+            with open_workbook_safe(file_path, read_only=True, data_only=True) as wb:
+                sheets = wb.sheetnames
+                return sheets
         except:
             return []
     
@@ -67,23 +66,19 @@ class DocumentParser:
             return None
         
         try:
-            import openpyxl
-            wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
-            
-            # Check each sheet for ##variable## pattern in first row
-            for sheet_name in wb.sheetnames:
-                ws = wb[sheet_name]
-                first_row = next(ws.iter_rows(min_row=1, max_row=1, values_only=True), None)
+            with open_workbook_safe(file_path, read_only=True, data_only=True) as wb:
+                # Check each sheet for ##variable## pattern in first row
+                for sheet_name in wb.sheetnames:
+                    ws = wb[sheet_name]
+                    first_row = next(ws.iter_rows(min_row=1, max_row=1, values_only=True), None)
+                    
+                    if first_row:
+                        # Check if any cell contains ##variable## pattern
+                        for cell_value in first_row:
+                            if cell_value and isinstance(cell_value, str) and '##' in cell_value:
+                                return sheet_name
                 
-                if first_row:
-                    # Check if any cell contains ##variable## pattern
-                    for cell_value in first_row:
-                        if cell_value and isinstance(cell_value, str) and '##' in cell_value:
-                            wb.close()
-                            return sheet_name
-            
-            wb.close()
-            return None
+                return None
         except:
             return None
     
@@ -101,21 +96,17 @@ class DocumentParser:
             return None
         
         try:
-            import openpyxl
-            wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
-            
-            # Check each sheet for ##variable## pattern anywhere
-            for sheet_name in wb.sheetnames:
-                ws = wb[sheet_name]
-                # Check all cells in the sheet (limit to first 100 rows for performance)
-                for row in ws.iter_rows(max_row=100, values_only=True):
-                    for cell_value in row:
-                        if cell_value and isinstance(cell_value, str) and '##' in cell_value:
-                            wb.close()
-                            return sheet_name
-            
-            wb.close()
-            return None
+            with open_workbook_safe(file_path, read_only=True, data_only=True) as wb:
+                # Check each sheet for ##variable## pattern anywhere
+                for sheet_name in wb.sheetnames:
+                    ws = wb[sheet_name]
+                    # Check all cells in the sheet (limit to first 100 rows for performance)
+                    for row in ws.iter_rows(max_row=100, values_only=True):
+                        for cell_value in row:
+                            if cell_value and isinstance(cell_value, str) and '##' in cell_value:
+                                return sheet_name
+                
+                return None
         except:
             return None
     
@@ -148,105 +139,101 @@ class DocumentParser:
             import openpyxl
             from openpyxl.utils import get_column_letter
             
-            # Load workbook with data_only=False to preserve formulas and formatting
-            wb = openpyxl.load_workbook(file_path, data_only=True)
-            
-            # Get the specified sheet or auto-detect
-            if sheet_name:
-                if sheet_name not in wb.sheetnames:
-                    raise ValueError(f"Sheet '{sheet_name}' not found in workbook")
-                ws = wb[sheet_name]
-            else:
-                # Try to auto-detect sheet with ##variable## headers
-                detected_sheet = None
-                for sname in wb.sheetnames:
-                    test_ws = wb[sname]
-                    first_row = next(test_ws.iter_rows(min_row=1, max_row=1, values_only=True), None)
-                    if first_row:
-                        for cell_value in first_row:
-                            if cell_value and isinstance(cell_value, str) and '##' in cell_value:
-                                detected_sheet = sname
-                                break
+            with open_workbook_safe(file_path, data_only=True) as wb:
+                # Get the specified sheet or auto-detect
+                if sheet_name:
+                    if sheet_name not in wb.sheetnames:
+                        raise ValueError(f"Sheet '{sheet_name}' not found in workbook")
+                    ws = wb[sheet_name]
+                else:
+                    # Try to auto-detect sheet with ##variable## headers
+                    detected_sheet = None
+                    for sname in wb.sheetnames:
+                        test_ws = wb[sname]
+                        first_row = next(test_ws.iter_rows(min_row=1, max_row=1, values_only=True), None)
+                        if first_row:
+                            for cell_value in first_row:
+                                if cell_value and isinstance(cell_value, str) and '##' in cell_value:
+                                    detected_sheet = sname
+                                    break
+                        if detected_sheet:
+                            break
+                    
+                    # Use detected sheet or fall back to active sheet
                     if detected_sheet:
-                        break
-                
-                # Use detected sheet or fall back to active sheet
-                if detected_sheet:
-                    ws = wb[detected_sheet]
-                    sheet_name = detected_sheet
-                else:
-                    ws = wb.active
-                    sheet_name = ws.title
-            
-            # Get all rows
-            rows = list(ws.iter_rows(values_only=False))
-            if len(rows) < 2:
-                raise ValueError("Excel file must have at least 2 rows (header + data)")
-            
-            # Extract first row (headers with ##variable##)
-            header_row = rows[0]
-            raw_headers = []
-            variables = []
-            
-            print(f"[DocumentParser] Parsing Excel data from sheet: {sheet_name}")
-            
-            for cell in header_row:
-                header_value = cell.value if cell.value else ""
-                raw_headers.append(str(header_value))
-                
-                if header_value:
-                    extracted = self.extract_variables(str(header_value))
-                    if extracted:
-                        variables.append(extracted[0])
-                        print(f"[DocumentParser] Found variable: {extracted[0]} from header: {header_value}")
+                        ws = wb[detected_sheet]
+                        sheet_name = detected_sheet
                     else:
-                        # If no ##variable## format, use the raw value
-                        variables.append(str(header_value))
-                        print(f"[DocumentParser] Using raw header as variable: {header_value}")
-                else:
-                    variables.append(f"column_{len(variables)}")
-                    print(f"[DocumentParser] Empty header, using: column_{len(variables)}")
-            
-            print(f"[DocumentParser] Total variables extracted: {len(variables)}")
-            
-            # Parse data rows (skip first row which is header)
-            data_rows = []
-            for row in rows[1:]:
-                row_data = {}
-                has_any_value = False  # Track if row has any non-empty value
+                        ws = wb.active
+                        sheet_name = ws.title
                 
-                for col_idx, cell in enumerate(row):
-                    if col_idx >= len(variables):
-                        break
-                    
-                    var_name = variables[col_idx]
-                    
-                    # Handle empty cells
-                    if cell.value is None:
-                        row_data[var_name] = ""
-                        continue
-                    
-                    # Format cell value based on its number format
-                    formatted_value = self._format_cell_value(cell)
-                    row_data[var_name] = formatted_value
-                    
-                    # Check if this cell has a meaningful value
-                    if formatted_value and str(formatted_value).strip():
-                        has_any_value = True
+                # Get all rows
+                rows = list(ws.iter_rows(values_only=False))
+                if len(rows) < 2:
+                    raise ValueError("Excel file must have at least 2 rows (header + data)")
                 
-                # Only add row if it has at least one non-empty value
-                if has_any_value:
-                    data_rows.append(row_data)
-            
-            wb.close()
-            
-            return {
-                'variables': variables,
-                'data': data_rows,
-                'raw_headers': raw_headers,
-                'sheet_name': sheet_name,
-                'total_rows': len(data_rows)
-            }
+                # Extract first row (headers with ##variable##)
+                header_row = rows[0]
+                raw_headers = []
+                variables = []
+                
+                print(f"[DocumentParser] Parsing Excel data from sheet: {sheet_name}")
+                
+                for cell in header_row:
+                    header_value = cell.value if cell.value else ""
+                    raw_headers.append(str(header_value))
+                    
+                    if header_value:
+                        extracted = self.extract_variables(str(header_value))
+                        if extracted:
+                            variables.append(extracted[0])
+                            print(f"[DocumentParser] Found variable: {extracted[0]} from header: {header_value}")
+                        else:
+                            # If no ##variable## format, use the raw value
+                            variables.append(str(header_value))
+                            print(f"[DocumentParser] Using raw header as variable: {header_value}")
+                    else:
+                        variables.append(f"column_{len(variables)}")
+                        print(f"[DocumentParser] Empty header, using: column_{len(variables)}")
+                
+                print(f"[DocumentParser] Total variables extracted: {len(variables)}")
+                
+                # Parse data rows (skip first row which is header)
+                data_rows = []
+                for row in rows[1:]:
+                    row_data = {}
+                    has_any_value = False  # Track if row has any non-empty value
+                    
+                    for col_idx, cell in enumerate(row):
+                        if col_idx >= len(variables):
+                            break
+                        
+                        var_name = variables[col_idx]
+                        
+                        # Handle empty cells
+                        if cell.value is None:
+                            row_data[var_name] = ""
+                            continue
+                        
+                        # Format cell value based on its number format
+                        formatted_value = self._format_cell_value(cell)
+                        row_data[var_name] = formatted_value
+                        
+                        # Check if this cell has a meaningful value
+                        if formatted_value and str(formatted_value).strip():
+                            has_any_value = True
+                    
+                    # Only add row if it has at least one non-empty value
+                    if has_any_value:
+                        data_rows.append(row_data)
+                
+                return {
+                    'variables': variables,
+                    'data': data_rows,
+                    'raw_headers': raw_headers,
+                    'sheet_name': sheet_name,
+                    'total_rows': len(data_rows)
+                }
             
         except Exception as e:
             raise ValueError(f"Error parsing Excel file: {str(e)}")
