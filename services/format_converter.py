@@ -175,33 +175,30 @@ class FormatConverter:
             
             elif input_ext == '.xlsx':
                 # Convert Excel to PDF
-                # Priority: MS Excel COM (best formatting) > LibreOffice > ReportLab (basic)
+                # CRITICAL: ONLY use MS Excel COM for Excel→PDF conversion
+                # LibreOffice produces POOR QUALITY Excel PDFs with formatting issues
+                # LibreOffice is OK for generating .xlsx files, but NOT for PDF conversion
                 
-                if WIN32_AVAILABLE:
-                    try:
-                        # MS Excel COM: Best formatting preservation, supports complex print settings
-                        print(f"[FormatConverter] Using MS Excel COM for Excel→PDF (best quality)")
-                        self._xlsx_to_pdf_com(input_path, output_path, print_settings)
-                    except Exception as com_error:
-                        # COM might fail in frozen exe, fall back to LibreOffice
-                        print(f"[FormatConverter] Excel COM failed ({str(com_error)}), trying LibreOffice...")
-                        if LIBREOFFICE_AVAILABLE:
-                            self._libreoffice_to_pdf(input_path, output_path)
-                        elif REPORTLAB_AVAILABLE:
-                            print(f"[FormatConverter] LibreOffice not available, using ReportLab (basic formatting)")
-                            self._xlsx_to_pdf_reportlab(input_path, output_path)
-                        else:
-                            raise RuntimeError(f"Excel COM failed and no fallback available: {str(com_error)}")
-                elif LIBREOFFICE_AVAILABLE:
-                    # LibreOffice: Fast, portable, decent formatting
-                    print(f"[FormatConverter] Using LibreOffice for Excel→PDF")
-                    self._libreoffice_to_pdf(input_path, output_path)
-                elif REPORTLAB_AVAILABLE:
-                    # ReportLab: Very fast, basic formatting only
-                    print(f"[FormatConverter] Using ReportLab for Excel→PDF (basic formatting)")
-                    self._xlsx_to_pdf_reportlab(input_path, output_path)
-                else:
-                    raise ImportError("Excel PDF conversion requires MS Office, LibreOffice, or ReportLab")
+                if not WIN32_AVAILABLE:
+                    raise RuntimeError(
+                        "Excel to PDF conversion REQUIRES MS Excel (pywin32). "
+                        "LibreOffice produces poor quality Excel PDFs and is NOT used. "
+                        "Please ensure MS Excel is installed."
+                    )
+                
+                try:
+                    # MS Excel COM: REQUIRED for proper Excel PDF formatting
+                    print(f"[FormatConverter] Using MS Excel COM for Excel→PDF (REQUIRED for quality)")
+                    self._xlsx_to_pdf_com(input_path, output_path, print_settings)
+                except Exception as com_error:
+                    # If COM fails, this is a CRITICAL error - do NOT fall back to LibreOffice
+                    error_msg = (
+                        f"Excel COM PDF conversion FAILED: {str(com_error)}\n"
+                        f"Excel PDFs require MS Excel COM for proper formatting.\n"
+                        f"LibreOffice/ReportLab produce poor quality Excel PDFs and are NOT used as fallback."
+                    )
+                    print(f"[FormatConverter] ERROR: {error_msg}")
+                    raise RuntimeError(error_msg)
             
             elif input_ext == '.msg':
                 # Convert MSG to PDF - requires Outlook
