@@ -24,8 +24,14 @@ docx2pdf==0.1.8; sys_platform == 'win32'
 # Environment and Configuration
 python-dotenv==1.0.0
 
+# HTTP requests (for license validation)
+requests>=2.31.0
+
 # Utilities
 python-dateutil==2.8.2
+
+# Image processing (for icon generation)
+Pillow>=10.0.0
 
 # Optional: Async job processing
 # celery==5.3.4

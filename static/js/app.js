@@ -480,7 +480,7 @@ async function downloadJob(jobId) {
         // Proceed with download
         const downloadUrl = `${API_BASE}/jobs/${jobId}/download`;
         
-        // Use fetch to check for errors before triggering download
+        // Fetch the file as a blob
         const response = await fetch(downloadUrl);
         
         if (!response.ok) {
@@ -489,8 +489,56 @@ async function downloadJob(jobId) {
             return;
         }
         
-        // If successful, trigger the download
-        window.location.href = downloadUrl;
+        // Get the blob from response
+        const blob = await response.blob();
+        const filename = `job_${jobId}_output.zip`;
+        
+        // Check if running in PyWebView
+        if (window.pywebview && window.pywebview.api) {
+            // Use PyWebView's native file dialog
+            try {
+                // Convert blob to base64
+                const reader = new FileReader();
+                reader.onloadend = async function() {
+                    const base64data = reader.result.split(',')[1];
+                    
+                    // Call PyWebView API to save file
+                    const result = await window.pywebview.api.save_file(filename, base64data);
+                    
+                    if (result.success) {
+                        showSuccess(`File saved successfully to: ${result.path}`);
+                    } else if (result.cancelled) {
+                        // User cancelled - no error message
+                        console.log('Download cancelled by user');
+                    } else {
+                        showError('Failed to save file: ' + (result.error || 'Unknown error'));
+                    }
+                };
+                reader.readAsDataURL(blob);
+            } catch (error) {
+                console.error('PyWebView save error:', error);
+                showError('Failed to save file: ' + error.message);
+            }
+        } else {
+            // Regular browser download
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.style.display = 'none';
+            a.href = url;
+            a.download = filename;
+            
+            // Append to body, click, and remove
+            document.body.appendChild(a);
+            a.click();
+            
+            // Clean up
+            setTimeout(() => {
+                document.body.removeChild(a);
+                window.URL.revokeObjectURL(url);
+            }, 100);
+            
+            showSuccess('Download started successfully');
+        }
         
     } catch (error) {
         console.error('Error downloading job:', error);

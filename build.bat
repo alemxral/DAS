@@ -32,6 +32,16 @@ if errorlevel 1 (
     )
 )
 
+REM Verify test dependencies are installed (optional but recommended)
+echo.
+echo Checking test dependencies...
+python -c "import pytest; import pytest_html; import pytest_cov; import psutil" 2>nul
+if errorlevel 1 (
+    echo Warning: Test dependencies not fully installed.
+    echo Consider running: pip install -r tests\requirements.txt
+    echo.
+)
+
 REM Clean previous builds
 echo.
 echo Cleaning previous builds...

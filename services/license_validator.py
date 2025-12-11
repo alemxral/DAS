@@ -5,6 +5,15 @@ Validates application license against remote server.
 import hashlib
 import requests
 from typing import Tuple
+import sys
+
+def safe_print(text):
+    """Print text safely, handling encoding errors."""
+    try:
+        print(text)
+    except UnicodeEncodeError:
+        # Fallback to ASCII-only output
+        print(text.encode('ascii', 'replace').decode('ascii'))
 
 class LicenseValidator:
     """Validates application license."""
@@ -27,23 +36,24 @@ class LicenseValidator:
         try:
             url = f"{self.base_url}/{self.hash}.txt"
             
-            print(f"[License] Checking: {url}")
+            safe_print(f"[License] Checking: {url}")
             
             response = requests.get(url, timeout=self.timeout)
             
             if response.status_code == 200:
-                print(f"[License] ✅ Access granted (HTTP 200)")
+                safe_print(f"[License] [OK] Access granted (HTTP 200)")
                 return True, "License valid"
             else:
-                print(f"[License] ❌ Access denied (HTTP {response.status_code})")
+                safe_print(f"[License] [DENIED] Access denied (HTTP {response.status_code})")
                 return False, "Service not available"
                 
         except requests.exceptions.Timeout:
-            print(f"[License] ❌ Timeout")
+            safe_print(f"[License] [ERROR] Timeout")
             return False, "Service not available - timeout"
         except requests.exceptions.ConnectionError:
-            print(f"[License] ❌ Connection error")
+            safe_print(f"[License] [ERROR] Connection error")
             return False, "Service not available - no connection"
         except Exception as e:
-            print(f"[License] ❌ Error: {e}")
+            safe_print(f"[License] [ERROR] Error: {e}")
             return False, f"Service not available"
+
