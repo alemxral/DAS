@@ -130,11 +130,25 @@ class FormatConverter:
     
     def _convert_to_pdf(self, input_path: str, output_dir: str, print_settings: Optional[Dict] = None) -> str:
         """Convert document to PDF."""
+        # Ensure all paths are absolute
+        input_path = str(Path(input_path).absolute())
+        output_dir = str(Path(output_dir).absolute())
+        
         input_ext = Path(input_path).suffix.lower()
         base_name = Path(input_path).stem
-        output_path = os.path.join(output_dir, f"{base_name}.pdf")
+        output_path = str(Path(output_dir) / f"{base_name}.pdf")
         
-        print(f"Converting {input_ext} to PDF: {input_path} -> {output_path}")
+        print(f"[FormatConverter] Converting {input_ext} to PDF")
+        print(f"[FormatConverter] Input: {input_path}")
+        print(f"[FormatConverter] Output: {output_path}")
+        print(f"[FormatConverter] Input exists: {os.path.exists(input_path)}")
+        print(f"[FormatConverter] Output dir exists: {os.path.exists(output_dir)}")
+        
+        if not os.path.exists(input_path):
+            raise FileNotFoundError(f"Input file not found: {input_path}")
+        
+        # Ensure output directory exists
+        os.makedirs(output_dir, exist_ok=True)
         
         try:
             if input_ext == '.docx':
@@ -163,9 +177,20 @@ class FormatConverter:
                 # Priority: MS Excel COM (best formatting) > LibreOffice > ReportLab (basic)
                 
                 if WIN32_AVAILABLE:
-                    # MS Excel COM: Best formatting preservation, supports complex print settings
-                    print(f"[FormatConverter] Using MS Excel COM for Excel→PDF (best quality)")
-                    self._xlsx_to_pdf_com(input_path, output_path, print_settings)
+                    try:
+                        # MS Excel COM: Best formatting preservation, supports complex print settings
+                        print(f"[FormatConverter] Using MS Excel COM for Excel→PDF (best quality)")
+                        self._xlsx_to_pdf_com(input_path, output_path, print_settings)
+                    except Exception as com_error:
+                        # COM might fail in frozen exe, fall back to LibreOffice
+                        print(f"[FormatConverter] Excel COM failed ({str(com_error)}), trying LibreOffice...")
+                        if LIBREOFFICE_AVAILABLE:
+                            self._libreoffice_to_pdf(input_path, output_path)
+                        elif REPORTLAB_AVAILABLE:
+                            print(f"[FormatConverter] LibreOffice not available, using ReportLab (basic formatting)")
+                            self._xlsx_to_pdf_reportlab(input_path, output_path)
+                        else:
+                            raise RuntimeError(f"Excel COM failed and no fallback available: {str(com_error)}")
                 elif LIBREOFFICE_AVAILABLE:
                     # LibreOffice: Fast, portable, decent formatting
                     print(f"[FormatConverter] Using LibreOffice for Excel→PDF")
@@ -187,11 +212,21 @@ class FormatConverter:
             else:
                 raise ValueError(f"Cannot convert {input_ext} to PDF")
             
-            # Verify file was created
+            # Verify file was created with detailed logging
+            print(f"[FormatConverter] Verifying PDF creation...")
+            print(f"[FormatConverter] Checking path: {output_path}")
+            print(f"[FormatConverter] Path is absolute: {Path(output_path).is_absolute()}")
+            print(f"[FormatConverter] File exists: {os.path.exists(output_path)}")
+            
             if not os.path.exists(output_path):
+                # Try to list what files ARE in the output directory
+                if os.path.exists(output_dir):
+                    files_in_dir = list(Path(output_dir).iterdir())
+                    print(f"[FormatConverter] Files in output dir: {files_in_dir}")
                 raise RuntimeError(f"PDF file was not created: {output_path}")
             
-            print(f"PDF created successfully: {output_path}")
+            file_size = os.path.getsize(output_path)
+            print(f"[FormatConverter] PDF created successfully: {output_path} ({file_size} bytes)")
             return output_path
             
         except Exception as e:
@@ -211,15 +246,22 @@ class FormatConverter:
         Convert document to PDF using LibreOffice headless mode.
         60% faster than COM, portable, good quality.
         """
+        # Ensure absolute paths
+        input_path = str(Path(input_path).absolute())
+        output_path = str(Path(output_path).absolute())
+        
         if not os.path.exists(input_path):
             raise FileNotFoundError(f"Input file not found: {input_path}")
         
-        abs_input = os.path.abspath(input_path)
-        abs_output = os.path.abspath(output_path)
+        abs_input = input_path
+        abs_output = output_path
         output_dir = os.path.dirname(abs_output)
         base_name = Path(abs_input).stem
         
         print(f"[LibreOffice] Converting: {Path(abs_input).name}")
+        print(f"[LibreOffice] Input: {abs_input}")
+        print(f"[LibreOffice] Output: {abs_output}")
+        print(f"[LibreOffice] Output dir: {output_dir}")
         
         # Get LibreOffice executable (portable or system)
         portable_path = _get_portable_soffice_path()
@@ -294,13 +336,27 @@ class FormatConverter:
             
             if result.returncode != 0:
                 error_msg = result.stderr or result.stdout or 'Unknown error'
+                print(f"[LibreOffice] Stderr: {result.stderr}")
+                print(f"[LibreOffice] Stdout: {result.stdout}")
                 raise RuntimeError(f"LibreOffice conversion failed: {error_msg}")
+            
+            print(f"[LibreOffice] Conversion command completed successfully")
             
             # LibreOffice creates file as <basename>.pdf in output_dir
             expected_file = os.path.join(output_dir, f"{base_name}.pdf")
             
+            print(f"[LibreOffice] Expected file: {expected_file}")
+            print(f"[LibreOffice] Target output: {abs_output}")
+            print(f"[LibreOffice] Expected file exists: {os.path.exists(expected_file)}")
+            
+            # List all files in output directory for debugging
+            if os.path.exists(output_dir):
+                files_in_dir = list(Path(output_dir).iterdir())
+                print(f"[LibreOffice] Files in output dir: {[f.name for f in files_in_dir]}")
+            
             # Rename if needed
             if expected_file != abs_output and os.path.exists(expected_file):
+                print(f"[LibreOffice] Renaming {expected_file} to {abs_output}")
                 if os.path.exists(abs_output):
                     os.remove(abs_output)
                 os.rename(expected_file, abs_output)
@@ -308,7 +364,8 @@ class FormatConverter:
             if not os.path.exists(abs_output):
                 raise RuntimeError(f"PDF not created at expected location: {abs_output}")
             
-            print(f"[LibreOffice] Conversion successful")
+            file_size = os.path.getsize(abs_output)
+            print(f"[LibreOffice] Conversion successful - {abs_output} ({file_size} bytes)")
             
         except subprocess.TimeoutExpired:
             raise RuntimeError("LibreOffice conversion timed out after 30 seconds")
@@ -356,27 +413,46 @@ class FormatConverter:
         if not os.path.exists(input_path):
             raise FileNotFoundError(f"Input file not found: {input_path}")
         
-        print(f"Starting Excel to PDF conversion: {input_path} -> {output_path}")
+        print(f"[Excel COM] Starting Excel to PDF conversion")
+        print(f"[Excel COM] Input: {input_path}")
+        print(f"[Excel COM] Output: {output_path}")
         
         # Initialize COM for this thread
-        pythoncom.CoInitialize()
         try:
-            excel = win32com.client.Dispatch("Excel.Application")
+            pythoncom.CoInitialize()
+            print(f"[Excel COM] COM initialized")
+        except Exception as e:
+            raise RuntimeError(f"Failed to initialize COM: {str(e)}")
+        
+        try:
+            try:
+                excel = win32com.client.Dispatch("Excel.Application")
+                print(f"[Excel COM] Excel.Application dispatched")
+            except Exception as e:
+                raise RuntimeError(f"Failed to create Excel.Application: {str(e)}")
+            
             excel.Visible = False
             excel.DisplayAlerts = False
+            print(f"[Excel COM] Excel configured (Visible=False, DisplayAlerts=False)")
             
             try:
                 abs_input = os.path.abspath(input_path)
                 abs_output = os.path.abspath(output_path)
                 
-                print(f"Opening Excel workbook: {abs_input}")
+                print(f"[Excel COM] Opening workbook: {abs_input}")
                 wb = excel.Workbooks.Open(abs_input, ReadOnly=False, UpdateLinks=False)
+                print(f"[Excel COM] Workbook opened successfully")
                 
                 # Save the workbook first to ensure it's not in a temporary state
-                wb.Save()
+                try:
+                    wb.Save()
+                    print(f"[Excel COM] Workbook saved")
+                except Exception as e:
+                    print(f"[Excel COM] Warning: Could not save workbook: {str(e)}")
                 
                 # Apply print settings if provided
                 if print_settings:
+                    print(f"[Excel COM] Applying print settings...")
                     for sheet in wb.Worksheets:
                         # Page setup
                         ps = sheet.PageSetup
@@ -471,10 +547,12 @@ class FormatConverter:
                     os.makedirs(output_dir_path, exist_ok=True)
                 
                 # Try different export methods
+                print(f"[Excel COM] Exporting to PDF...")
                 try:
                     # Method 1: ExportAsFixedFormat with minimal parameters
                     if from_page == 1 and to_page == 0:
                         # Export all pages
+                        print(f"[Excel COM] Using ExportAsFixedFormat (all pages)")
                         wb.ExportAsFixedFormat(
                             Type=0,  # xlTypePDF
                             Filename=abs_output,
@@ -485,6 +563,7 @@ class FormatConverter:
                         )
                     else:
                         # Export specific page range
+                        print(f"[Excel COM] Using ExportAsFixedFormat (pages {from_page}-{to_page})")
                         wb.ExportAsFixedFormat(
                             Type=0,
                             Filename=abs_output,
@@ -495,23 +574,30 @@ class FormatConverter:
                             To=to_page,
                             OpenAfterPublish=False
                         )
+                    print(f"[Excel COM] Export successful")
                 except Exception as export_error:
-                    print(f"ExportAsFixedFormat failed, trying alternative method: {str(export_error)}")
+                    print(f"[Excel COM] ExportAsFixedFormat failed: {str(export_error)}")
+                    print(f"[Excel COM] Trying alternative method...")
                     
                     # Method 2: Use PrintOut to PDF printer as fallback
                     # First try to use Microsoft Print to PDF
                     try:
+                        print(f"[Excel COM] Trying PrintOut method")
                         wb.PrintOut(
                             ActivePrinter="Microsoft Print to PDF",
                             PrintToFile=True,
                             PrToFileName=abs_output
                         )
-                    except:
+                        print(f"[Excel COM] PrintOut successful")
+                    except Exception as printout_error:
+                        print(f"[Excel COM] PrintOut failed: {str(printout_error)}")
+                        print(f"[Excel COM] Trying SaveAs method")
                         # If that fails, save as PDF using SaveAs
                         file_format = 57  # xlTypePDF
                         wb.SaveAs(abs_output, FileFormat=file_format)
+                        print(f"[Excel COM] SaveAs successful")
                 
-                print(f"Closing Excel workbook")
+                print(f"[Excel COM] Closing Excel workbook")
                 wb.Close(SaveChanges=False)
                 
                 # Small delay to ensure file is written
@@ -529,21 +615,25 @@ class FormatConverter:
                 raise
             finally:
                 try:
+                    print(f"[Excel COM] Quitting Excel application")
                     excel.Quit()
                     # Give Excel time to fully quit
                     import time
                     time.sleep(0.3)
-                except:
-                    pass
+                    print(f"[Excel COM] Excel quit successfully")
+                except Exception as e:
+                    print(f"[Excel COM] Error quitting Excel: {str(e)}")
         finally:
             pythoncom.CoUninitialize()
+            print(f"[Excel COM] COM uninitialized")
         
         # Verify PDF was created
+        print(f"[Excel COM] Verifying output file: {output_path}")
         if not os.path.exists(output_path):
             raise RuntimeError(f"PDF file was not created by Excel: {output_path}")
         
         file_size = os.path.getsize(output_path)
-        print(f"Excel PDF created successfully: {output_path} ({file_size} bytes)")
+        print(f"[Excel COM] PDF created successfully: {output_path} ({file_size} bytes)")
     
     def _xlsx_to_pdf_reportlab(self, input_path: str, output_path: str):
         """Convert Excel to PDF using ReportLab (fallback)."""
