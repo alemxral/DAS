@@ -16,6 +16,8 @@ a = Analysis(
         ('templates', 'templates'),
         ('static', 'static'),
         ('config', 'config'),
+        # Include portable LibreOffice
+        ('portable/libreoffice', 'portable/libreoffice'),
         # Include .env if exists
         ('.env', '.') if Path('.env').exists() else None,
     ],

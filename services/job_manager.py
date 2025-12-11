@@ -207,28 +207,55 @@ class JobManager:
         """Get all jobs with a specific status."""
         return [job for job in self.jobs.values() if job.status == status]
     
-    def delete_job(self, job_id: str) -> bool:
+    def delete_job(self, job_id: str, force: bool = False) -> Dict[str, any]:
         """
         Delete a job and its associated files.
         
         Args:
             job_id: Job ID
+            force: If True, attempt to delete even if processing (with retries)
             
         Returns:
-            True if deleted successfully
+            Dict with 'success' (bool) and optional 'error' (str)
         """
         if job_id not in self.jobs:
-            return False
+            return {'success': False, 'error': 'Job not found'}
         
-        # Delete job directory
+        job = self.jobs[job_id]
+        
+        # Check if job is currently processing
+        if job.status == JobStatus.PROCESSING and not force:
+            return {'success': False, 'error': 'Cannot delete job while it is processing. Please wait for completion or use force delete.'}
+        
+        # If processing and force=True, try to cancel first
+        if job.status == JobStatus.PROCESSING and force:
+            if hasattr(job, '_cancel_event'):
+                job._cancel_event.set()
+                # Wait up to 5 seconds for cancellation
+                if hasattr(job, '_thread') and job._thread:
+                    job._thread.join(timeout=5.0)
+        
+        # Delete job directory with retry logic
         job_dir = self.get_job_dir(job_id)
         if job_dir.exists():
-            shutil.rmtree(job_dir)
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    shutil.rmtree(job_dir)
+                    break
+                except PermissionError as e:
+                    if attempt < max_retries - 1:
+                        import time
+                        time.sleep(1)  # Wait 1 second before retry
+                    else:
+                        return {'success': False, 'error': f'Cannot delete job files: {str(e)}. Files may be in use.'}
+                except Exception as e:
+                    return {'success': False, 'error': f'Error deleting job: {str(e)}'}
         
         # Remove from memory
         del self.jobs[job_id]
         
-        return True
+        return {'success': True}
     
     def process_job(self, job_id: str) -> Job:
         """
@@ -279,6 +306,7 @@ class JobManager:
         Returns:
             Updated Job instance
         """
+        import time
         try:
             # Parse data file with optional sheet name
             data_sheet = job.metadata.get('data_sheet', None)
@@ -292,8 +320,21 @@ class JobManager:
             output_dir = self.get_job_dir(job.id) / "outputs"
             output_dir.mkdir(parents=True, exist_ok=True)
             
+            # Initialize for batched saves
+            last_save_time = time.time()
+            save_interval = 5  # Save every 5 seconds
+            save_count = 10  # Or every 10 rows
+            rows_since_save = 0
+            
             # Process each data row
             for idx, row_data in enumerate(data_result['data'], start=1):
+                # Check for cancellation
+                if hasattr(job, '_cancel_event') and job._cancel_event and job._cancel_event.is_set():
+                    print(f"Job {job.id}: Cancellation requested, stopping at row {idx}")
+                    job.update_status(JobStatus.CANCELLED, error_message="Job cancelled by user")
+                    self.save_job_metadata(job)
+                    return job
+                
                 try:
                     # Determine output filename
                     # Check for ##filename## variable or custom filename variable in job metadata
@@ -488,7 +529,16 @@ class JobManager:
                     if not job.error_message:
                         job.error_message = error_msg
                 
-                self.save_job_metadata(job)
+                # Batched metadata saves: save every 10 rows or every 5 seconds
+                rows_since_save += 1
+                current_time = time.time()
+                if rows_since_save >= save_count or (current_time - last_save_time) >= save_interval:
+                    self.save_job_metadata(job)
+                    rows_since_save = 0
+                    last_save_time = current_time
+            
+            # Final save after loop completes
+            self.save_job_metadata(job)
             
             # Validate that we have output files
             if job.processed_records == 0:

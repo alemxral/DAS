@@ -296,8 +296,11 @@ def create_job():
         # Start processing in background thread
         auto_process = request.form.get('auto_process', 'true').lower() == 'true'
         if auto_process:
+            import threading
+            job._cancel_event = threading.Event()
             thread = threading.Thread(target=manager.process_job, args=(job.id,))
-            thread.daemon = True
+            thread.daemon = False  # Changed from True to allow joining
+            job._thread = thread
             thread.start()
         
         return jsonify({
@@ -390,8 +393,11 @@ def create_split_job():
         # Start processing in background
         auto_process = request.form.get('auto_process', 'true').lower() == 'true'
         if auto_process:
+            import threading
+            job._cancel_event = threading.Event()
             thread = threading.Thread(target=manager.process_job, args=(job.id,))
-            thread.daemon = True
+            thread.daemon = False
+            job._thread = thread
             thread.start()
         
         return jsonify({
@@ -535,8 +541,11 @@ def create_merge_job():
         # Start processing in background
         auto_process = request.form.get('auto_process', 'true').lower() == 'true'
         if auto_process:
+            import threading
+            job._cancel_event = threading.Event()
             thread = threading.Thread(target=manager.process_job, args=(job.id,))
-            thread.daemon = True
+            thread.daemon = False
+            job._thread = thread
             thread.start()
         
         return jsonify({
@@ -563,8 +572,11 @@ def process_job(job_id):
             return jsonify({'success': False, 'error': f'Job cannot be processed (status: {job.status.value})'}), 400
         
         # Process in background thread
+        import threading
+        job._cancel_event = threading.Event()
         thread = threading.Thread(target=manager.process_job, args=(job_id,))
-        thread.daemon = True
+        thread.daemon = False
+        job._thread = thread
         thread.start()
         
         return jsonify({
@@ -720,8 +732,11 @@ def rerun_job(job_id):
         )
         
         # Start processing
+        import threading
+        new_job._cancel_event = threading.Event()
         thread = threading.Thread(target=manager.process_job, args=(new_job.id,))
-        thread.daemon = True
+        thread.daemon = False
+        new_job._thread = thread
         thread.start()
         
         return jsonify({
@@ -734,20 +749,54 @@ def rerun_job(job_id):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@api_bp.route('/jobs/<job_id>/cancel', methods=['POST'])
+def cancel_job(job_id):
+    """Cancel a running job."""
+    try:
+        manager = get_job_manager()
+        job = manager.get_job(job_id)
+        
+        if not job:
+            return jsonify({'success': False, 'error': 'Job not found'}), 404
+        
+        if job.status != JobStatus.PROCESSING:
+            return jsonify({'success': False, 'error': f'Job is not processing (status: {job.status.value})'}), 400
+        
+        # Set cancellation flag
+        if hasattr(job, '_cancel_event') and job._cancel_event:
+            job._cancel_event.set()
+            
+            # Wait up to 30 seconds for graceful shutdown
+            if hasattr(job, '_thread') and job._thread:
+                job._thread.join(timeout=30.0)
+            
+            return jsonify({
+                'success': True,
+                'message': 'Job cancelled successfully'
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Job does not support cancellation (older job format)'
+            }), 400
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @api_bp.route('/jobs/<job_id>', methods=['DELETE'])
 def delete_job(job_id):
     """Delete a job."""
     try:
         manager = get_job_manager()
-        success = manager.delete_job(job_id)
+        force = request.args.get('force', 'false').lower() == 'true'
+        result = manager.delete_job(job_id, force=force)
         
-        if not success:
-            return jsonify({'success': False, 'error': 'Job not found'}), 404
+        if not result['success']:
+            status_code = 409 if 'processing' in result.get('error', '').lower() else 404
+            return jsonify(result), status_code
         
-        return jsonify({
-            'success': True,
-            'message': 'Job deleted successfully'
-        })
+        return jsonify(result)
         
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500

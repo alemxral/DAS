@@ -221,6 +221,10 @@ function createJobCard(job) {
                             <i class="fas fa-redo mr-1"></i> Retry
                         </button>
                     ` : ''}
+                ` : job.status === 'processing' ? `
+                    <button onclick="cancelJob('${job.id}'); event.stopPropagation();" class="flex-1 bg-orange-600 hover:bg-orange-700 text-white px-3 py-2 rounded-lg text-sm transition">
+                        <i class="fas fa-stop mr-1"></i> Cancel
+                    </button>
                 ` : ''}
                 <button onclick="deleteJob('${job.id}'); event.stopPropagation();" class="bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-lg text-sm transition">
                     <i class="fas fa-trash"></i>
@@ -854,11 +858,49 @@ async function deleteJob(jobId) {
             showSuccess('Job deleted successfully');
             loadDashboardData();
         } else {
-            showError(data.error || 'Failed to delete job');
+            // Check if job is busy, offer force delete
+            if (response.status === 409) {
+                const forceDelete = confirm('Job is currently processing. Force delete anyway? (May take a moment)');
+                if (forceDelete) {
+                    const forceResponse = await fetch(`${API_BASE}/jobs/${jobId}?force=true`, {
+                        method: 'DELETE'
+                    });
+                    const forceData = await forceResponse.json();
+                    if (forceData.success) {
+                        showSuccess('Job deleted successfully');
+                        loadDashboardData();
+                    } else {
+                        showError(forceData.error || 'Failed to delete job');
+                    }
+                }
+            } else {
+                showError(data.error || 'Failed to delete job');
+            }
         }
     } catch (error) {
         console.error('Error deleting job:', error);
         showError('Failed to delete job');
+    }
+}
+
+async function cancelJob(jobId) {
+    try {
+        showToast('Cancelling job...', 'info');
+        const response = await fetch(`${API_BASE}/jobs/${jobId}/cancel`, {
+            method: 'POST'
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            showSuccess('Job cancelled successfully');
+            loadDashboardData();
+        } else {
+            showError(data.error || 'Failed to cancel job');
+        }
+    } catch (error) {
+        console.error('Error cancelling job:', error);
+        showError('Failed to cancel job');
     }
 }
 

@@ -77,6 +77,10 @@ class Job:
         # Metadata
         self.metadata: Dict = {}
         
+        # Thread tracking and cancellation
+        self._thread: Optional[object] = None  # Thread object running this job
+        self._cancel_event: Optional[object] = None  # threading.Event for cancellation
+        
         # Excel printing settings
         self.excel_print_settings: Optional[Dict] = None
         
