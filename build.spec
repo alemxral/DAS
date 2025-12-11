@@ -1,11 +1,31 @@
 # -*- mode: python ; coding: utf-8 -*-
 import os
 from pathlib import Path
+from PyInstaller.utils.hooks import collect_data_files
 
 block_cipher = None
 
 # Get the project directory
 project_dir = Path('.').absolute()
+
+# Use ultra-minimal LibreOffice (114MB instead of 1.4GB)
+def collect_libreoffice_files():
+    """Collect ultra-minimal LibreOffice for headless PDF conversion."""
+    lo_ultra = project_dir / 'portable' / 'libreoffice-ultra'
+    if not lo_ultra.exists():
+        print("WARNING: Ultra-minimal LibreOffice not found! Run create-ultra-minimal-libreoffice.ps1")
+        return []
+    
+    files = []
+    for item in lo_ultra.rglob('*'):
+        if item.is_file():
+            # Map libreoffice-ultra -> libreoffice in final build
+            rel_path = item.relative_to(lo_ultra)
+            dest_dir = str(Path('portable/libreoffice') / rel_path.parent).replace('\\', '/')
+            files.append((str(item), dest_dir))
+    
+    print(f"Collected {len(files)} ultra-minimal LibreOffice files")
+    return files
 
 a = Analysis(
     ['main.py'],
@@ -16,11 +36,9 @@ a = Analysis(
         ('templates', 'templates'),
         ('static', 'static'),
         ('config', 'config'),
-        # Include portable LibreOffice
-        ('portable/libreoffice', 'portable/libreoffice'),
         # Include .env if exists
         ('.env', '.') if Path('.env').exists() else None,
-    ],
+    ] + collect_libreoffice_files(),
     hiddenimports=[
         # Flask and extensions
         'flask',

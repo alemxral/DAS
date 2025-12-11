@@ -42,6 +42,11 @@ storage/
 uploads/
 *.log
 
+# LibreOffice - ignore full version, only track ultra-minimal
+portable/libreoffice/
+portable/libreoffice-minimal/
+# Keep: portable/libreoffice-ultra/
+
 # OS
 .DS_Store
 Thumbs.db
